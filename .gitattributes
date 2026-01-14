@@ -1,0 +1,47 @@
+# Обработка окончаний строк
+* text=auto eol=lf
+
+# Бинарные файлы Unity — не трогать
+*.meta binary
+*.asset binary
+*.prefab binary
+*.unity binary
+*.anim binary
+*.controller binary
+*.mat binary
+*.physicMaterial binary
+*.physicsMaterial2D binary
+*.renderTexture binary
+*.spriteatlas binary
+*.brush binary
+*.flare binary
+*.fontsettings binary
+*.guiskin binary
+*.giparams binary
+*.lighting binary
+*.mask binary
+*.mixer binary
+*.overrideController binary
+*.playable binary
+*.shadervariants binary
+*.spriteatlasv2 binary
+*.terrainlayer binary
+*.cubemap binary
+*.dll binary
+*.exe binary
+*.so binary
+*.bundle binary
+
+# Скрипты — текстовые, с LF
+*.cs text eol=lf
+*.json text eol=lf
+*.xml text eol=lf
+*.yaml text eol=lf
+*.shader text eol=lf
+*.cginc text eol=lf
+*.hlsl text eol=lf
+*.glsl text eol=lf
+*.txt text eol=lf
+
+# VS Code
+.vscode/* text eol=lf

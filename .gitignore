@@ -1,0 +1,33 @@
+# Unity
+[Ll]ibrary/
+[Tt]emp/
+[Oo]bj/
+[Bb]uild/
+[Bb]uilds/
+[Uu]ser[Ss]ettings/
+*.csproj
+*.unityproj
+*.sln
+*.suo
+*.tmp
+*.user
+*.userprefs
+*.pidb
+*.booproj
+*.svd
+
+# Visual Studio
+.vs/
+*.VC.db
+*.VC.VC.opendb
+
+# macOS
+.DS_Store
+
+# Rider
+.idea/
+
+# Cache
+Library/Artifacts/
+Library/ShaderCache/
+Library/ShaderCache-CG/
