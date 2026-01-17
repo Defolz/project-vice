@@ -6,15 +6,6 @@ public partial class BootstrapSystem : SystemBase
     {
         base.OnStartRunning();
 
-        // Создаём GameStateComponent
-        var gameStateEntity = EntityManager.CreateEntity();
-        EntityManager.AddComponentData(gameStateEntity, new GameStateComponent
-        {
-            Value = GameStateType.Running,
-            IsTimePaused = false
-        });
-        EntityManager.SetName(gameStateEntity, "GameStateSingleton");
-
         // Создаём GameTimeComponent
         var gameTimeEntity = EntityManager.CreateEntity();
         EntityManager.AddComponentData(gameTimeEntity, new GameTimeComponent
@@ -23,7 +14,7 @@ public partial class BootstrapSystem : SystemBase
             Day = 1,
             Hour = 0,
             Minute = 0,
-            TimeScale = 1f
+            TimeScale = 1f // Установим нормальную скорость
         });
         EntityManager.SetName(gameTimeEntity, "GameTimeSingleton");
 
@@ -36,6 +27,8 @@ public partial class BootstrapSystem : SystemBase
             IsMenuPressed = false
         });
         EntityManager.SetName(inputEntity, "GameInputSingleton");
+        
+        // Удалим GameStateComponent из Bootstrap, т.к. он создаётся в GameStateSystem.OnCreate
     }
 
     protected override void OnUpdate() { }

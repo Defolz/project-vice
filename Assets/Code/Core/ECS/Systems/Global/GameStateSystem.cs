@@ -4,6 +4,23 @@ using Unity.Burst;
 [UpdateInGroup(typeof(SimulationSystemGroup))]
 public partial struct GameStateSystem : ISystem
 {
+    [BurstCompile]
+    public void OnCreate(ref SystemState state)
+    {
+        // Создаём GameStateComponent, если не существует
+        if (!SystemAPI.HasSingleton<GameStateComponent>())
+        {
+            var entity = state.EntityManager.CreateEntity();
+            state.EntityManager.AddComponentData(entity, new GameStateComponent
+            {
+                Value = GameStateType.Running,
+                IsTimePaused = false
+            });
+            state.EntityManager.SetName(entity, "GameStateSingleton");
+        }
+    }
+
+    [BurstCompile]
     public void OnUpdate(ref SystemState state)
     {
         var gameStateSingleton = SystemAPI.GetSingletonRW<GameStateComponent>();
