@@ -4,10 +4,10 @@ using Unity.Collections;
 // Буферный элемент для хранения одной связи с другим NPC
 public struct RelationshipEntry : IBufferElementData
 {
-    public int OtherNPCId;        // ID другого NPC (см. NPCId.Value)
+    public uint OtherNPCId;        // ID другого NPC (см. NPCId.Value)
     public float Value;           // Значение отношения (-1.0f вражда, 0 нейтрально, 1.0f любовь/лояльность)
 
-    public RelationshipEntry(int otherNpcId, float value)
+    public RelationshipEntry(uint otherNpcId, float value)
     {
         OtherNPCId = otherNpcId;
         Value = value;

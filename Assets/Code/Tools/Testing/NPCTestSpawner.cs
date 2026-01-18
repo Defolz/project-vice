@@ -1,15 +1,16 @@
 using Unity.Entities;
 using Unity.Mathematics;
+using Unity.Collections;
 using UnityEngine;
 
-// ВНИМАНИЕ: Это временный скрипт для тестирования компонентов Core NPC.
+// ВНИМАНИЕ: Это временный скрипт для тестирования компонентов Core NPC и Chunks.
 // Не предназначен для использования в продакшен-коде.
 public class NPCTestSpawner : MonoBehaviour
 {
     [SerializeField]
     private int testSeed = 12345; // Сид для генерации тестового NPC
 
-    private World testWorld;
+    private World testWorld; // Наш изолированный World
     private EntityManager entityManager;
 
     void Start()
@@ -53,17 +54,30 @@ public class NPCTestSpawner : MonoBehaviour
         entityManager.AddComponentData(relationshipBufferEntity, new NPCRelationshipBufferData()); // Компонент-заглушка
         var relationshipBuffer = entityManager.AddBuffer<RelationshipEntry>(relationshipBufferEntity);
         // Заполняем буфер тестовыми данными
-        relationshipBuffer.Add(new RelationshipEntry(67890, 0.9f)); // Дружба с NPC ID 67890
-        relationshipBuffer.Add(new RelationshipEntry(11111, -0.7f)); // Вражда с NPC ID 11111
+        relationshipBuffer.Add(new RelationshipEntry(67890U, 0.9f)); // Дружба с NPC ID 67890 (uint)
+        relationshipBuffer.Add(new RelationshipEntry(11111U, -0.7f)); // Вражда с NPC ID 11111 (uint)
 
 
         // 3. Добавляем все компоненты Core NPC Template
-        entityManager.AddComponentData(npcEntity, NPCId.Generate(testSeed));
-        entityManager.AddComponentData(npcEntity, new NameData("Джон", "Смит", "Жирный Джон"));
-        entityManager.AddComponentData(npcEntity, new Location(new float3(10.5f, 0f, -5.2f)));
+        // ИСПОЛЬЗУЕМ ОБНОВЛЁННЫЙ Location с X-Y
+        var globalPos = new float2(10.5f, -5.2f); // 2D позиция
+        var location = Location.FromGlobal(globalPos);
+
+        // ИСПРАВЛЕНО: передаём uint в NPCId.Generate
+        entityManager.AddComponentData(npcEntity, NPCId.Generate((uint)testSeed)); // Приводим int seed к uint
+        
+        // ИСПРАВЛЕНО: передаём FixedString32Bytes в NameData
+        entityManager.AddComponentData(npcEntity, new NameData(
+            new FixedString128Bytes("Джон"), 
+            new FixedString128Bytes("Смит"), 
+            new FixedString128Bytes("Жирный Джон")
+        ));
+        
+        entityManager.AddComponentData(npcEntity, location); // <-- Используем обновлённый Location
         entityManager.AddComponentData(npcEntity, new Faction(Faction.Families.Value)); // Присоединяем к Families
         entityManager.AddComponentData(npcEntity, new Schedule(scheduleBufferEntity)); // Передаем Entity с буфером
-        entityManager.AddComponentData(npcEntity, new CurrentGoal(GoalType.Work, targetPosition: new float3(15, 0, 0), priority: 0.7f));
+        // ИСПРАВЛЕНО: используем float3 для CurrentGoal
+        entityManager.AddComponentData(npcEntity, new CurrentGoal(GoalType.Work, targetPosition: new float3(15, 0, 0), priority: 0.7f)); // Используем float3
         entityManager.AddComponentData(npcEntity, new StateFlags(alive: true, injured: false, wanted: true));
         entityManager.AddComponentData(npcEntity, new Traits(aggression: 0.6f, loyalty: 0.8f, intelligence: 0.5f));
         entityManager.AddComponentData(npcEntity, new Relationships(relationshipBufferEntity)); // Передаем Entity с буфером
@@ -74,7 +88,7 @@ public class NPCTestSpawner : MonoBehaviour
         // 4. Читаем и логируем данные
         var id = entityManager.GetComponentData<NPCId>(npcEntity);
         var name = entityManager.GetComponentData<NameData>(npcEntity);
-        var loc = entityManager.GetComponentData<Location>(npcEntity);
+        var loc = entityManager.GetComponentData<Location>(npcEntity); // <-- Читаем обновлённый Location
         var faction = entityManager.GetComponentData<Faction>(npcEntity);
         var scheduleComp = entityManager.GetComponentData<Schedule>(npcEntity);
         var goal = entityManager.GetComponentData<CurrentGoal>(npcEntity);
@@ -83,8 +97,11 @@ public class NPCTestSpawner : MonoBehaviour
         var relationshipsComp = entityManager.GetComponentData<Relationships>(npcEntity);
 
         Debug.Log($"ID: {id}");
-        Debug.Log($"Имя: {name}");
-        Debug.Log($"Позиция: {loc.GetPosition()}");
+        // ИСПРАВЛЕНО: выводим поля NameData, а не сам объект
+        Debug.Log($"Имя: {name.FirstName} '{name.Nickname}' {name.LastName}");
+        Debug.Log($"Позиция (Chunk/Local): {loc}"); // <-- Выводит ChunkId и LocalPos
+        Debug.Log($"Позиция (Global 2D): {loc.GlobalPosition2D}"); // <-- Выводит вычисленную GlobalPos 2D
+        Debug.Log($"Позиция (Global 3D): {loc.GlobalPosition3D}"); // <-- Выводит 3D (X, Y, 0)
         Debug.Log($"Фракция: {faction}");
         Debug.Log($"Цель: {goal}");
         Debug.Log($"Состояния: {states}");
@@ -103,7 +120,7 @@ public class NPCTestSpawner : MonoBehaviour
         Debug.Log($"Отношения:");
         foreach (var rel in relationshipBufferReader)
         {
-            Debug.Log($"  - NPC {rel.OtherNPCId}: {rel.Value:F2}");
+            Debug.Log($"  - NPC {rel.OtherNPCId}: {rel.Value:F2}"); // OtherNPCId теперь uint
         }
 
 

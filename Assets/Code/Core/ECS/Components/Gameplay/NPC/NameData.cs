@@ -1,31 +1,25 @@
-using Unity.Collections;
 using Unity.Entities;
-using Unity.Mathematics;
-using Unity.Collections.LowLevel.Unsafe;
+using Unity.Collections;
 
 public struct NameData : IComponentData
 {
-    public FixedString32Bytes FirstName;
-    public FixedString32Bytes LastName;
-    public FixedString32Bytes Nickname; // Прозвище, может быть пустым
-    
-    public NameData(string firstName, string lastName, string nickname = "")
+    public FixedString128Bytes FirstName; // Изменено на FixedString128Bytes
+    public FixedString128Bytes LastName;  // Изменено на FixedString128Bytes
+    public FixedString128Bytes Nickname;  // Изменено на FixedString128Bytes
+
+    public NameData(FixedString128Bytes firstName, FixedString128Bytes lastName, FixedString128Bytes nickname)
     {
-        FirstName = new FixedString32Bytes(firstName);
-        LastName = new FixedString32Bytes(lastName);
-        Nickname = new FixedString32Bytes(nickname);
+        FirstName = firstName;
+        LastName = lastName;
+        Nickname = nickname;
     }
-    
-    public FixedString64Bytes GetFullName()
-    {
-        if (Nickname.IsEmpty)
-            return $"{FirstName} {LastName}";
-        
-        return $"{FirstName} \"{Nickname}\" {LastName}";
-    }
-    
+
+    // Метод для получения строкового представления (для отладки/логирования вне Burst)
     public override string ToString()
     {
-        return GetFullName().ToString();
+        // ВНИМАНИЕ: ToString() может вызывать .ToString() на FixedString, что недопустимо в Burst.
+        // Поэтому, если этот метод будет вызываться внутри Burst-системы, он тоже будет ошибкой.
+        // Лучше использовать NameData как есть в системах и конвертировать в string только для Debug.Log или UI.
+        return $"{FirstName} '{Nickname}' {LastName}";
     }
 }

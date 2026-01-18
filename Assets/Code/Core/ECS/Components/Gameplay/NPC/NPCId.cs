@@ -3,21 +3,22 @@ using Unity.Mathematics;
 
 public struct NPCId : IComponentData
 {
-    public int Value;
+    public uint Value; // Изменено на uint
     public int GenerationSeed; // Для воспроизводимости процедурной генерации
     
-    public static NPCId Generate(int seed)
+    // Изменён метод Generate, чтобы принимать uint
+    public static NPCId Generate(uint seed) // Принимает uint
     {
-        var random = new Random((uint)(seed ^ 123456789));
+        var random = new Random(seed ^ 123456789U); // Используем uint для Random, ^ с uint
         return new NPCId
         {
-            Value = random.NextInt(),
-            GenerationSeed = seed
+            Value = random.NextUInt(), // Генерируем uint ID
+            GenerationSeed = (int)seed // Сохраняем seed как int, если нужно
         };
     }
     
     public override string ToString()
     {
-        return $"NPC_{Value:X8}";
+        return $"NPC_{Value:X8}"; // Форматирование uint
     }
 }
