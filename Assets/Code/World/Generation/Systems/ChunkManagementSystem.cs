@@ -2,7 +2,6 @@ using Unity.Burst;
 using Unity.Collections;
 using Unity.Entities;
 using Unity.Mathematics;
-// using UnityEngine; // Убрали UnityEngine
 
 // Система управления загрузкой, выгрузкой и жизненным циклом чанков (теперь 2D X-Y)
 [UpdateInGroup(typeof(InitializationSystemGroup))] // Или SimulationSystemGroup, зависит от логики
@@ -128,12 +127,10 @@ public partial struct ChunkManagementSystem : ISystem
             if (!shouldBeLoaded && entry.State == ChunkState.Loaded)
             {
                 // Помечаем чанк для выгрузки
-                 ecb.SetComponent(entry.Entity, new Chunk(entry.Id, ChunkIdToWorldPosition(entry.Id), ChunkState.Unloading));
-                 // В реальности выгрузка может происходить на следующем шаге или в отдельной системе
-                 // Для упрощения сразу удалим Entity
-                 ecb.DestroyEntity(entry.Entity);
-                 chunkMapBuffer.RemoveAt(i); // Удаляем запись из буфера
-                 // Debug.Log($"Unloaded and destroyed chunk {entry.Id}"); // Убрали
+                // Удаляем чанк Entity (NPC будут удалены в отдельной системе)
+                ecb.DestroyEntity(entry.Entity);
+                chunkMapBuffer.RemoveAt(i); // Удаляем запись из буфера
+                // Debug.Log($"Marked chunk {entry.Id} for unloading (NPC cleanup handled by ChunkNPCCleanupSystem)"); // Убрали
             }
         }
 

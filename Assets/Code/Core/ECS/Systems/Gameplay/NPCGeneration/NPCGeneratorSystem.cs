@@ -27,7 +27,7 @@ public partial struct NPCGeneratorSystem : ISystem
         var chunkMapSingleton = SystemAPI.GetSingleton<ChunkMapSingleton>();
         var chunkMapBuffer = entityManager.GetBuffer<ChunkMapEntry>(chunkMapSingleton.ChunkMapDataEntity);
 
-        // 2. Определяем, какие чанки загружены и подходят для спавна
+        // 2. Определяем, какие чанки загружены
         var loadedChunks = new NativeList<int2>(Allocator.Temp);
         foreach (var entry in chunkMapBuffer)
         {
@@ -37,23 +37,52 @@ public partial struct NPCGeneratorSystem : ISystem
             }
         }
 
-        // 3. Для каждого загруженного чанка решаем, сколько NPC в нём создать
+        // 3. Подсчитываем текущее количество NPC в каждом загруженном чанке
+        var currentNPCCounts = new NativeParallelHashMap<int2, int>(loadedChunks.Length, Allocator.Temp);
+        
+        // Инициализируем счетчики
+        foreach (var chunkId in loadedChunks)
+        {
+            currentNPCCounts[chunkId] = 0;
+        }
+
+        // Подсчитываем существующих NPC (только те, которые уже полностью созданы)
+        // Используем SystemAPI.Query для получения всех NPC с Location, но без NPCSpawnData
+        foreach (var (location, entity) in SystemAPI.Query<RefRO<Location>>().WithEntityAccess())
+        {
+            // Пропускаем NPC, которые еще в процессе спавна (имеют NPCSpawnData)
+            if (!SystemAPI.HasComponent<NPCSpawnData>(entity))
+            {
+                if (currentNPCCounts.ContainsKey(location.ValueRO.ChunkId))
+                {
+                    currentNPCCounts[location.ValueRO.ChunkId]++;
+                }
+            }
+        }
+
+        // 4. Для каждого загруженного чанка решаем, сколько NPC в нём создать (только недостающих)
         var spawnRequests = new NativeList<NPCSpawnData>(Allocator.Temp);
         foreach (var chunkId in loadedChunks)
         {
-            // Простая логика: создать N NPC в чанке, где N зависит от плотности
-            var numNPCsInChunk = (int)math.round(random.NextFloat() * NPC_DENSITY_PER_CHUNK);
-            numNPCsInChunk = math.min(numNPCsInChunk, MAX_NPC_PER_CHUNK); // Ограничение
-
-            for (int i = 0; i < numNPCsInChunk; i++)
+            // Подсчитываем, сколько NPC уже есть в чанке
+            var currentCount = currentNPCCounts.TryGetValue(chunkId, out var count) ? count : 0;
+            
+            // Определяем сколько NPC должно быть в чанке
+            var desiredCount = (int)math.round(NPC_DENSITY_PER_CHUNK);
+            desiredCount = math.min(desiredCount, MAX_NPC_PER_CHUNK);
+            
+            // Создаем только недостающих NPC
+            var numNPCsToCreate = math.max(0, desiredCount - currentCount);
+            
+            for (int i = 0; i < numNPCsToCreate; i++)
             {
-                // 4. Генерируем данные для одного NPC (без Entity буферов)
+                // 5. Генерируем данные для одного NPC (без Entity буферов)
                 var npcData = GenerateNPCData(ref random, chunkId, entityManager);
                 spawnRequests.Add(npcData);
             }
         }
 
-        // 5. Отправляем запросы на спавн (например, через EntityCommandBuffer)
+        // 6. Отправляем запросы на спавн (например, через EntityCommandBuffer)
         var ecb = new EntityCommandBuffer(Allocator.Temp);
         foreach (var spawnData in spawnRequests)
         {
@@ -65,6 +94,7 @@ public partial struct NPCGeneratorSystem : ISystem
         ecb.Dispose();
 
         loadedChunks.Dispose();
+        currentNPCCounts.Dispose();
         spawnRequests.Dispose();
     }
 
