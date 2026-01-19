@@ -17,7 +17,9 @@ public partial struct NPCBufferCreationSystem : ISystem
     {
         var ecbSingleton = SystemAPI.GetSingletonRW<BeginInitializationEntityCommandBufferSystem.Singleton>();
         var ecb = ecbSingleton.ValueRW.CreateCommandBuffer(state.WorldUnmanaged);
-        var random = new Random(12345); // Используем фиксированный сид для детерминизма или передаём сид извне
+        // Используем динамический сид на основе времени (в миллисекундах) + 1 для избежания нулевого сида
+        var seed = (uint)(SystemAPI.Time.ElapsedTime * 1000.0) + 1;
+        var random = new Random(seed);
 
         // Итерируемся только по NPCSpawnData для чтения
         foreach (var (spawnDataRO, npcEntity) in SystemAPI.Query<RefRO<NPCSpawnData>>().WithEntityAccess())

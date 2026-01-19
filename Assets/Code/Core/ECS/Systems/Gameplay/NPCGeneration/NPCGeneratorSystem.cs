@@ -18,13 +18,25 @@ public partial struct NPCGeneratorSystem : ISystem
     public void OnUpdate(ref SystemState state)
     {
         var entityManager = state.EntityManager;
-        var random = new Random(12345); // Используем фиксированный сид для детерминизма или передаём сид извне
+        // Используем динамический сид на основе времени (в миллисекундах) + 1 для избежания нулевого сида
+        var seed = (uint)(SystemAPI.Time.ElapsedTime * 1000.0) + 1;
+        var random = new Random(seed);
 
-        // 1. Получаем синглтон ChunkMap (или другую структуру, отслеживающую загруженные чанки)
-        // Пока используем существующий singleton из ChunkManagementSystem
-        // !! ВАЖНО !!: Эта система должна запускаться *после* ChunkManagementSystem, чтобы данные были готовы
-        // Также нужно убедиться, что Buffer<ChunkMapEntry> содержит актуальные данные
-        var chunkMapSingleton = SystemAPI.GetSingleton<ChunkMapSingleton>();
+        // 1. Получаем синглтон ChunkMap с проверкой наличия
+        if (!SystemAPI.TryGetSingleton<ChunkMapSingleton>(out var chunkMapSingleton))
+        {
+            // ChunkMapSingleton еще не создан, пропускаем этот кадр
+            return;
+        }
+
+        // Проверяем, что ChunkMapDataEntity валиден
+        if (!entityManager.Exists(chunkMapSingleton.ChunkMapDataEntity) || 
+            !entityManager.HasBuffer<ChunkMapEntry>(chunkMapSingleton.ChunkMapDataEntity))
+        {
+            // Entity или буфер не существует, пропускаем
+            return;
+        }
+
         var chunkMapBuffer = entityManager.GetBuffer<ChunkMapEntry>(chunkMapSingleton.ChunkMapDataEntity);
 
         // 2. Определяем, какие чанки загружены

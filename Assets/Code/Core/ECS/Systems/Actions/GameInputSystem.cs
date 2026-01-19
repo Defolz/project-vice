@@ -35,11 +35,9 @@ public partial class GameInputSystem : SystemBase
             IsMenuPressed = isMenuPressed
         };
 
-        // Проверяем, существует ли синглтон
-        var inputQuery = GetEntityQuery(typeof(GameInputComponent));
-        if (inputQuery.CalculateEntityCount() > 0)
+        // Используем SystemAPI для безопасного обновления синглтона
+        if (SystemAPI.TryGetSingletonEntity<GameInputComponent>(out var inputEntity))
         {
-            var inputEntity = inputQuery.GetSingletonEntity();
             EntityManager.SetComponentData(inputEntity, input);
         }
     }

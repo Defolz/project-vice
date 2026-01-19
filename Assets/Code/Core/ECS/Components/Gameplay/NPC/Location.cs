@@ -4,25 +4,29 @@ using Unity.Mathematics;
 public struct Location : IComponentData
 {
     public int2 ChunkId; // ID чанка, в котором находится NPC
-    // Позиция внутри чанка теперь в 2D (X, Y)
-    public float2 PositionInChunk; // Позиция внутри чанка (локальная, 2D X-Y)
 
-    // Вспомогательное свойство для получения глобальной 2D позиции
-    public float2 GlobalPosition2D => new float2(
+    // Позиция внутри чанка теперь в 3D (X, Y, Z), где Y — высота
+    public float3 PositionInChunk; // Позиция внутри чанка (локальная, 3D X-Y-Z)
+
+    // Вспомогательное свойство для получения глобальной 3D позиции
+    public float3 GlobalPosition3D => new float3(
         ChunkId.x * ChunkConstants.CHUNK_SIZE + PositionInChunk.x,
-        ChunkId.y * ChunkConstants.CHUNK_SIZE + PositionInChunk.y
+        PositionInChunk.y, // Высота
+        ChunkId.y * ChunkConstants.CHUNK_SIZE + PositionInChunk.z
     );
-    
-    // Если нужно передавать 3D позицию в систему рендера, Z можно использовать для слоя/высоты
-    // Но для логики 2D игры Z обычно 0 или фиксирован
-    public float3 GlobalPosition3D => new float3(GlobalPosition2D.x, GlobalPosition2D.y, 0); // Z=0 как базовая высота/слой
 
-    public Location(int2 chunkId, float2 localPosition)
+    // Совместимость с 2D: проецируем Z в Y
+    public float2 GlobalPosition2D => new float2(GlobalPosition3D.x, GlobalPosition3D.z);
+
+    public Location(int2 chunkId, float3 localPosition)
     {
         ChunkId = chunkId;
         PositionInChunk = localPosition;
     }
-    
+
+    // Совместимость: конструктор из float2 (Z = 0)
+    public Location(int2 chunkId, float2 localPosition) : this(chunkId, new float3(localPosition.x, 0, localPosition.y)) {}
+
     /// <summary>
     /// Создает Location из 2D глобальной позиции (X-Y), автоматически вычисляя ChunkId и PositionInChunk.
     /// </summary>
@@ -30,13 +34,28 @@ public struct Location : IComponentData
     {
         var chunkX = (int)math.floor(globalPos2D.x / ChunkConstants.CHUNK_SIZE);
         var chunkY = (int)math.floor(globalPos2D.y / ChunkConstants.CHUNK_SIZE);
-        
-        var localX = globalPos2D.x - (chunkX * ChunkConstants.CHUNK_SIZE);
-        var localY = globalPos2D.y - (chunkY * ChunkConstants.CHUNK_SIZE);
 
-        return new Location(new int2(chunkX, chunkY), new float2(localX, localY));
+        var localX = globalPos2D.x - (chunkX * ChunkConstants.CHUNK_SIZE);
+        var localZ = globalPos2D.y - (chunkY * ChunkConstants.CHUNK_SIZE);
+
+        return new Location(new int2(chunkX, chunkY), new float3(localX, 0, localZ));
     }
-    
+
+    /// <summary>
+    /// Создает Location из 3D глобальной позиции (X-Y-Z), автоматически вычисляя ChunkId и PositionInChunk.
+    /// </summary>
+    public static Location FromGlobal(float3 globalPos3D)
+    {
+        var chunkX = (int)math.floor(globalPos3D.x / ChunkConstants.CHUNK_SIZE);
+        var chunkY = (int)math.floor(globalPos3D.z / ChunkConstants.CHUNK_SIZE); // Z → Y в чанке
+
+        var localX = globalPos3D.x - (chunkX * ChunkConstants.CHUNK_SIZE);
+        var localY = globalPos3D.y; // Высота
+        var localZ = globalPos3D.z - (chunkY * ChunkConstants.CHUNK_SIZE);
+
+        return new Location(new int2(chunkX, chunkY), new float3(localX, localY, localZ));
+    }
+
     // Метод для обновления позиции и, при необходимости, ChunkId
     public void UpdatePosition(float2 newGlobalPos2D)
     {
@@ -44,7 +63,15 @@ public struct Location : IComponentData
         ChunkId = newLoc.ChunkId;
         PositionInChunk = newLoc.PositionInChunk;
     }
-    
+
+    // Метод для обновления позиции в 3D
+    public void UpdatePosition(float3 newGlobalPos3D)
+    {
+        var newLoc = FromGlobal(newGlobalPos3D);
+        ChunkId = newLoc.ChunkId;
+        PositionInChunk = newLoc.PositionInChunk;
+    }
+
     public override string ToString()
     {
         return $"Location(Chunk:{ChunkId}, Local:{PositionInChunk})";

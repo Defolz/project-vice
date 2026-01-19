@@ -1,33 +1,54 @@
 using Unity.Entities;
 
+// Enum для типов фракций
+public enum FactionType : byte
+{
+    Invalid = 0,
+    Families = 1,
+    Colombians = 2,
+    FBI = 3,
+    Police = 4,
+    Civilians = 5
+}
+
 public struct Faction : IComponentData
 {
-    public int Value; // Уникальный ID фракции (например, 1 = Families, 2 = Colombians, 3 = FBI)
+    public FactionType Type;
     
-    public static readonly Faction Invalid = new Faction { Value = 0 };
-    public static readonly Faction Families = new Faction { Value = 1 };
-    public static readonly Faction Colombians = new Faction { Value = 2 };
-    public static readonly Faction FBI = new Faction { Value = 3 };
-    public static readonly Faction Police = new Faction { Value = 4 };
-    public static readonly Faction Civilians = new Faction { Value = 5 };
+    public static readonly Faction Invalid = new Faction { Type = FactionType.Invalid };
+    public static readonly Faction Families = new Faction { Type = FactionType.Families };
+    public static readonly Faction Colombians = new Faction { Type = FactionType.Colombians };
+    public static readonly Faction FBI = new Faction { Type = FactionType.FBI };
+    public static readonly Faction Police = new Faction { Type = FactionType.Police };
+    public static readonly Faction Civilians = new Faction { Type = FactionType.Civilians };
 
-    public bool IsValid => Value != 0;
+    public bool IsValid => Type != FactionType.Invalid;
     
+    // Конструктор из enum
+    public Faction(FactionType type)
+    {
+        Type = type;
+    }
+    
+    // Конструктор из int (для обратной совместимости)
     public Faction(int value)
     {
-        Value = value;
+        Type = (FactionType)value;
     }
+    
+    // Для обратной совместимости
+    public int Value => (int)Type;
     
     public override string ToString()
     {
-        return Value switch
+        return Type switch
         {
-            1 => "Families",
-            2 => "Colombians", 
-            3 => "FBI",
-            4 => "Police",
-            5 => "Civilians",
-            _ => $"Unknown({Value})"
+            FactionType.Families => "Families",
+            FactionType.Colombians => "Colombians",
+            FactionType.FBI => "FBI",
+            FactionType.Police => "Police",
+            FactionType.Civilians => "Civilians",
+            _ => $"Unknown({(int)Type})"
         };
     }
 }

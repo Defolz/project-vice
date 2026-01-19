@@ -14,12 +14,12 @@ public struct NameData : IComponentData
         Nickname = nickname;
     }
 
-    // Метод для получения строкового представления (для отладки/логирования вне Burst)
-    public override string ToString()
+    // Метод для получения строкового представления (ТОЛЬКО для отладки/логирования вне Burst)
+    // НИКОГДА не вызывайте этот метод внутри Burst-систем!
+    public string ToDebugString()
     {
-        // ВНИМАНИЕ: ToString() может вызывать .ToString() на FixedString, что недопустимо в Burst.
-        // Поэтому, если этот метод будет вызываться внутри Burst-системы, он тоже будет ошибкой.
-        // Лучше использовать NameData как есть в системах и конвертировать в string только для Debug.Log или UI.
+        // Используем отдельный метод вместо ToString() для явного указания,
+        // что это НЕ должно использоваться в Burst-коде
         return $"{FirstName} '{Nickname}' {LastName}";
     }
 }

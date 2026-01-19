@@ -22,10 +22,10 @@ public partial struct GameTimeSystem : ISystem
 
                     // Пересчитываем Day/Hour/Minute
                     var totalMinutes = (int)(newTotalSeconds / 60f);
-                    var newMinute = (sbyte)(totalMinutes % 60);
+                    var newMinute = totalMinutes % 60;
                     var totalHours = totalMinutes / 60;
-                    var newHour = (sbyte)(totalHours % 24);
-                    var newDay = (int)(totalHours / 24);
+                    var newHour = totalHours % 24;
+                    var newDay = totalHours / 24;
 
                     // Обновляем синглтон
                     var updatedGameTime = new GameTimeComponent

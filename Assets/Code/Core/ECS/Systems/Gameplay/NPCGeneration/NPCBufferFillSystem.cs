@@ -4,27 +4,40 @@ using Unity.Burst; // Без [BurstCompile]
 // Система, заполняющая буферы на основе инструкций из NPCBufferFillInstruction
 // Читает NPCBufferEntities для доступа к целевым Entity буферов
 // Не удаляет временные Entity или компоненты
-[UpdateInGroup(typeof(SimulationSystemGroup))]
-[UpdateAfter(typeof(NPCBufferCreationSystem))] // Теперь это не обязательно, но можно оставить для ясности
+// Перемещено в InitializationSystemGroup для согласованности с NPCBufferCreationSystem
+[UpdateInGroup(typeof(InitializationSystemGroup))]
+[UpdateAfter(typeof(NPCBufferCreationSystem))]
 public partial struct NPCBufferFillSystem : ISystem
 {
-    [BurstCompile] // УБРАНО
+    private BufferLookup<TimeSlot> _timeSlotLookup;
+    private BufferLookup<RelationshipEntry> _relationshipLookup;
+
+    [BurstCompile]
+    public void OnCreate(ref SystemState state)
+    {
+        _timeSlotLookup = state.GetBufferLookup<TimeSlot>(false);
+        _relationshipLookup = state.GetBufferLookup<RelationshipEntry>(false);
+    }
+
+    [BurstCompile]
     public void OnUpdate(ref SystemState state)
     {
-        // var ecb = ... // Не нужен ECB для удаления в этой системе
+        // Обновляем lookup'ы перед использованием
+        _timeSlotLookup.Update(ref state);
+        _relationshipLookup.Update(ref state);
 
         foreach (var (fillInstruction, bufferEntities, entity) in SystemAPI.Query<RefRO<NPCBufferFillInstruction>, RefRO<NPCBufferEntities>>().WithEntityAccess())
         {
             var instruction = fillInstruction.ValueRO;
             var buffers = bufferEntities.ValueRO;
 
-            // Получаем буферы с инструкциями
-            var scheduleInstructionBuffer = state.EntityManager.GetBuffer<TimeSlot>(instruction.ScheduleInstructionsBufferEntity);
-            var relationshipsInstructionBuffer = state.EntityManager.GetBuffer<RelationshipEntry>(instruction.RelationshipsInstructionsBufferEntity);
+            // Получаем буферы с инструкциями через lookup
+            var scheduleInstructionBuffer = _timeSlotLookup[instruction.ScheduleInstructionsBufferEntity];
+            var relationshipsInstructionBuffer = _relationshipLookup[instruction.RelationshipsInstructionsBufferEntity];
 
             // Получаем буферы, которые нужно заполнить
-            var scheduleBuffer = state.EntityManager.GetBuffer<TimeSlot>(buffers.ScheduleBufferEntity);
-            var relationshipsBuffer = state.EntityManager.GetBuffer<RelationshipEntry>(buffers.RelationshipsBufferEntity);
+            var scheduleBuffer = _timeSlotLookup[buffers.ScheduleBufferEntity];
+            var relationshipsBuffer = _relationshipLookup[buffers.RelationshipsBufferEntity];
 
             // Заполняем целевые буферы из буферов инструкций
             foreach (var slot in scheduleInstructionBuffer)
@@ -36,11 +49,6 @@ public partial struct NPCBufferFillSystem : ISystem
             {
                 relationshipsBuffer.Add(entry);
             }
-
-            // НЕ удаляем временные Entity или компоненты здесь
-            // ecb.DestroyEntity(instruction.ScheduleInstructionsBufferEntity);
-            // ecb.DestroyEntity(instruction.RelationshipsInstructionsBufferEntity);
-            // ecb.RemoveComponent<NPCBufferFillInstruction>(entity);
         }
     }
 }

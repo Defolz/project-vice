@@ -4,7 +4,8 @@ using Unity.Entities;
 using Unity.Mathematics;
 
 // Система для очистки NPC при выгрузке чанков
-[UpdateInGroup(typeof(SimulationSystemGroup))]
+// Перемещено в InitializationSystemGroup для согласованности с ChunkManagementSystem
+[UpdateInGroup(typeof(InitializationSystemGroup))]
 [UpdateAfter(typeof(ChunkManagementSystem))]
 public partial struct ChunkNPCCleanupSystem : ISystem
 {

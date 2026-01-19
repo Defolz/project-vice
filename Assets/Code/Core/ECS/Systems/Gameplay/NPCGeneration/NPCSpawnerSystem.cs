@@ -4,8 +4,9 @@ using Unity.Entities;
 // Система, фактически добавляющая окончательные компоненты NPC из NPCSpawnData
 // и удаляющая NPCSpawnData и NPCBufferEntities
 // Читает NPCBufferEntities для доступа к Entity буферов
-[UpdateInGroup(typeof(InitializationSystemGroup))] // Или SimulationSystemGroup
-[UpdateAfter(typeof(NPCBufferFillSystem))] // Обновляем порядок
+// Перемещено в InitializationSystemGroup для согласованности с NPCBufferFillSystem
+[UpdateInGroup(typeof(InitializationSystemGroup))]
+[UpdateAfter(typeof(NPCBufferFillSystem))]
 public partial struct NPCSpawnerSystem : ISystem
 {
     [BurstCompile]

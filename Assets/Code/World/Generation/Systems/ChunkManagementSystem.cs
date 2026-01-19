@@ -75,27 +75,34 @@ public partial struct ChunkManagementSystem : ISystem
         // 5. Создаём CommandBuffer для безопасного изменения ECS структуры
         var ecb = new EntityCommandBuffer(Allocator.Temp);
 
-        // 6. Проверяем, какие чанки нужно создать (загрузить)
+        // 6. Создаем HashMap для быстрого поиска (O(1) вместо O(n))
+        var existingChunks = new NativeHashMap<int2, ChunkMapEntry>(chunkMapBuffer.Length, Allocator.Temp);
+        for (int i = 0; i < chunkMapBuffer.Length; i++)
+        {
+            existingChunks.TryAdd(chunkMapBuffer[i].Id, chunkMapBuffer[i]);
+        }
+
+        // Проверяем, какие чанки нужно создать (загрузить)
         foreach (var id in requiredChunks)
         {
-            // Проверяем, есть ли уже запись о чанке в буфере
-            bool exists = false;
-            for (int i = 0; i < chunkMapBuffer.Length; i++)
+            if (existingChunks.TryGetValue(id, out var entry))
             {
-                if (chunkMapBuffer[i].Id.Equals(id))
+                // Чанк уже существует, проверяем состояние
+                if (entry.State == ChunkState.Unloaded)
                 {
-                    exists = true;
-                    // Проверяем состояние, возможно, нужно обновить (например, из Unloaded в Loaded)
-                    if (chunkMapBuffer[i].State == ChunkState.Unloaded)
+                    ecb.SetComponent(entry.Entity, new Chunk(id, ChunkIdToWorldPosition(id), ChunkState.Loaded));
+                    // Обновляем запись в буфере
+                    for (int i = 0; i < chunkMapBuffer.Length; i++)
                     {
-                         ecb.SetComponent(chunkMapBuffer[i].Entity, new Chunk(id, ChunkIdToWorldPosition(id), ChunkState.Loaded));
-                         chunkMapBuffer[i] = new ChunkMapEntry(id, chunkMapBuffer[i].Entity, ChunkState.Loaded);
+                        if (chunkMapBuffer[i].Id.Equals(id))
+                        {
+                            chunkMapBuffer[i] = new ChunkMapEntry(id, entry.Entity, ChunkState.Loaded);
+                            break;
+                        }
                     }
-                    break;
                 }
             }
-
-            if (!exists)
+            else
             {
                 // Чанк не существует, создаём его
                 var newChunkEntity = ecb.Instantiate(chunkPrefab);
@@ -109,22 +116,19 @@ public partial struct ChunkManagementSystem : ISystem
             }
         }
 
-        // 7. Проверяем, какие чанки нужно выгрузить (не находятся в requiredChunks)
-        // (Это упрощённая логика, в реальности может быть сложнее, учитывая задержки, флаги и т.д.)
+        // 7. Создаем HashSet для быстрой проверки нужных чанков
+        var requiredChunksSet = new NativeHashSet<int2>(requiredChunks.Length, Allocator.Temp);
+        foreach (var id in requiredChunks)
+        {
+            requiredChunksSet.Add(id);
+        }
+
+        // Проверяем, какие чанки нужно выгрузить
         for (int i = chunkMapBuffer.Length - 1; i >= 0; i--)
         {
             var entry = chunkMapBuffer[i];
-            bool shouldBeLoaded = false;
-            foreach (var req_id in requiredChunks)
-            {
-                if (entry.Id.Equals(req_id))
-                {
-                    shouldBeLoaded = true;
-                    break;
-                }
-            }
-
-            if (!shouldBeLoaded && entry.State == ChunkState.Loaded)
+            
+            if (!requiredChunksSet.Contains(entry.Id) && entry.State == ChunkState.Loaded)
             {
                 // Помечаем чанк для выгрузки
                 // Удаляем чанк Entity (NPC будут удалены в отдельной системе)
@@ -138,7 +142,9 @@ public partial struct ChunkManagementSystem : ISystem
         ecb.Playback(entityManager);
         ecb.Dispose();
 
-        // 9. Освобождаем временный список
+        // 9. Освобождаем временные структуры
+        existingChunks.Dispose();
+        requiredChunksSet.Dispose();
         requiredChunks.Dispose();
     }
 
