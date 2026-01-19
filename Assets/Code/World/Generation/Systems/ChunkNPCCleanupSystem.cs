@@ -31,7 +31,8 @@ public partial struct ChunkNPCCleanupSystem : ISystem
         // Для этого проверим, есть ли NPC, которые находятся в чанках, которые больше не существуют в карте
         
         // Сначала соберем все существующие ChunkId из карты
-        var existingChunkIds = new NativeHashSet<int2>(1000, Allocator.Temp);
+        // Используем реальный размер вместо захардкоженного значения
+        var existingChunkIds = new NativeHashSet<int2>(chunkMapBuffer.Length, Allocator.Temp);
         foreach (var entry in chunkMapBuffer)
         {
             existingChunkIds.Add(entry.Id);

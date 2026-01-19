@@ -5,13 +5,13 @@ using Unity.Burst;
 // Запускается после NPCBufferFillSystem
 // 
 // ПОРЯДОК РАБОТЫ:
-// 1. NPCGeneratorSystem создает NPC с NPCSpawnData
-// 2. NPCBufferCreationSystem создает Entity с буферами и инструкциями
-// 3. NPCBufferFillSystem заполняет буферы из инструкций
-// 4. NPCBufferCleanupSystem (эта) удаляет временные инструкции
-// 5. NPCSpawnerSystem добавляет финальные компоненты
-// Перемещено в InitializationSystemGroup для согласованности с NPCBufferFillSystem
-[UpdateInGroup(typeof(InitializationSystemGroup))]
+// 1. NPCGeneratorSystem (в InitializationSystemGroup) создает NPC с NPCSpawnData
+// 2. NPCBufferCreationSystem (в InitializationSystemGroup) создает Entity с буферами и инструкциями
+// 3. ECB применяется в конце InitializationSystemGroup
+// 4. NPCBufferFillSystem (в SimulationSystemGroup) заполняет буферы из инструкций
+// 5. NPCBufferCleanupSystem (эта, в SimulationSystemGroup) удаляет временные инструкции
+// 6. NPCSpawnerSystem (в SimulationSystemGroup) добавляет финальные компоненты
+[UpdateInGroup(typeof(SimulationSystemGroup))]
 [UpdateAfter(typeof(NPCBufferFillSystem))]
 public partial struct NPCBufferCleanupSystem : ISystem
 {

@@ -22,6 +22,20 @@ public struct Location : IComponentData
     {
         ChunkId = chunkId;
         PositionInChunk = localPosition;
+        
+        // Валидация: проверяем, что позиция внутри чанка в допустимых пределах
+#if ENABLE_UNITY_COLLECTIONS_CHECKS
+        if (localPosition.x < 0 || localPosition.x >= ChunkConstants.CHUNK_SIZE ||
+            localPosition.z < 0 || localPosition.z >= ChunkConstants.CHUNK_SIZE)
+        {
+            UnityEngine.Debug.LogWarning($"Local position {localPosition} is outside chunk bounds [0, {ChunkConstants.CHUNK_SIZE}]. Position will be clamped.");
+            PositionInChunk = new float3(
+                Unity.Mathematics.math.clamp(localPosition.x, 0, ChunkConstants.CHUNK_SIZE - 0.01f),
+                localPosition.y,
+                Unity.Mathematics.math.clamp(localPosition.z, 0, ChunkConstants.CHUNK_SIZE - 0.01f)
+            );
+        }
+#endif
     }
 
     // Совместимость: конструктор из float2 (Z = 0)
@@ -59,17 +73,13 @@ public struct Location : IComponentData
     // Метод для обновления позиции и, при необходимости, ChunkId
     public void UpdatePosition(float2 newGlobalPos2D)
     {
-        var newLoc = FromGlobal(newGlobalPos2D);
-        ChunkId = newLoc.ChunkId;
-        PositionInChunk = newLoc.PositionInChunk;
+        this = FromGlobal(newGlobalPos2D);
     }
 
     // Метод для обновления позиции в 3D
     public void UpdatePosition(float3 newGlobalPos3D)
     {
-        var newLoc = FromGlobal(newGlobalPos3D);
-        ChunkId = newLoc.ChunkId;
-        PositionInChunk = newLoc.PositionInChunk;
+        this = FromGlobal(newGlobalPos3D);
     }
 
     public override string ToString()

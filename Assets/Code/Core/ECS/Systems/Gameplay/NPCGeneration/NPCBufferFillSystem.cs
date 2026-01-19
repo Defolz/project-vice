@@ -4,50 +4,69 @@ using Unity.Burst; // Без [BurstCompile]
 // Система, заполняющая буферы на основе инструкций из NPCBufferFillInstruction
 // Читает NPCBufferEntities для доступа к целевым Entity буферов
 // Не удаляет временные Entity или компоненты
-// Перемещено в InitializationSystemGroup для согласованности с NPCBufferCreationSystem
-[UpdateInGroup(typeof(InitializationSystemGroup))]
-[UpdateAfter(typeof(NPCBufferCreationSystem))]
+// ВАЖНО: Перемещена в SimulationSystemGroup, чтобы ECB из InitializationSystemGroup успел применить структурные изменения
+[UpdateInGroup(typeof(SimulationSystemGroup), OrderFirst = true)]
 public partial struct NPCBufferFillSystem : ISystem
 {
+    private ComponentLookup<NPCBufferFillInstruction> _instructionLookup;
+    private ComponentLookup<NPCBufferEntities> _bufferEntitiesLookup;
     private BufferLookup<TimeSlot> _timeSlotLookup;
     private BufferLookup<RelationshipEntry> _relationshipLookup;
-
-    [BurstCompile]
+    
     public void OnCreate(ref SystemState state)
     {
+        _instructionLookup = state.GetComponentLookup<NPCBufferFillInstruction>(true);
+        _bufferEntitiesLookup = state.GetComponentLookup<NPCBufferEntities>(true);
         _timeSlotLookup = state.GetBufferLookup<TimeSlot>(false);
         _relationshipLookup = state.GetBufferLookup<RelationshipEntry>(false);
     }
-
-    [BurstCompile]
+    
     public void OnUpdate(ref SystemState state)
     {
-        // Обновляем lookup'ы перед использованием
+        // Обновляем все lookup'ы
+        _instructionLookup.Update(ref state);
+        _bufferEntitiesLookup.Update(ref state);
         _timeSlotLookup.Update(ref state);
         _relationshipLookup.Update(ref state);
-
-        foreach (var (fillInstruction, bufferEntities, entity) in SystemAPI.Query<RefRO<NPCBufferFillInstruction>, RefRO<NPCBufferEntities>>().WithEntityAccess())
+        
+        var entityManager = state.EntityManager;
+        
+        // Получаем все Entity с нужными компонентами через GetAllEntities
+        using var allEntities = entityManager.GetAllEntities(Unity.Collections.Allocator.Temp);
+        
+        foreach (var entity in allEntities)
         {
-            var instruction = fillInstruction.ValueRO;
-            var buffers = bufferEntities.ValueRO;
+            // Проверяем есть ли нужные компоненты
+            if (!_instructionLookup.HasComponent(entity) || !_bufferEntitiesLookup.HasComponent(entity))
+                continue;
+                
+            var instruction = _instructionLookup[entity];
+            var buffers = _bufferEntitiesLookup[entity];
 
-            // Получаем буферы с инструкциями через lookup
+            // Проверяем что все Entity существуют
+            if (!entityManager.Exists(instruction.ScheduleInstructionsBufferEntity) ||
+                !entityManager.Exists(instruction.RelationshipsInstructionsBufferEntity) ||
+                !entityManager.Exists(buffers.ScheduleBufferEntity) ||
+                !entityManager.Exists(buffers.RelationshipsBufferEntity))
+            {
+                continue;
+            }
+
+            // Получаем буферы через Lookup (они обновлены в начале OnUpdate)
             var scheduleInstructionBuffer = _timeSlotLookup[instruction.ScheduleInstructionsBufferEntity];
             var relationshipsInstructionBuffer = _relationshipLookup[instruction.RelationshipsInstructionsBufferEntity];
-
-            // Получаем буферы, которые нужно заполнить
             var scheduleBuffer = _timeSlotLookup[buffers.ScheduleBufferEntity];
             var relationshipsBuffer = _relationshipLookup[buffers.RelationshipsBufferEntity];
 
-            // Заполняем целевые буферы из буферов инструкций
-            foreach (var slot in scheduleInstructionBuffer)
+            // Заполняем целевые буферы
+            for (int i = 0; i < scheduleInstructionBuffer.Length; i++)
             {
-                scheduleBuffer.Add(slot);
+                scheduleBuffer.Add(scheduleInstructionBuffer[i]);
             }
 
-            foreach (var entry in relationshipsInstructionBuffer)
+            for (int i = 0; i < relationshipsInstructionBuffer.Length; i++)
             {
-                relationshipsBuffer.Add(entry);
+                relationshipsBuffer.Add(relationshipsInstructionBuffer[i]);
             }
         }
     }

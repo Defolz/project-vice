@@ -38,6 +38,15 @@ public struct CurrentGoal : IComponentData
         TargetPosition = targetPosition;
         ExpiryTime = expiryTime;
         Priority = math.clamp(priority, 0.0f, 1.0f);
+
+        // Валидация: убедимся, что цели, требующие Entity, имеют валидный entity
+#if ENABLE_UNITY_COLLECTIONS_CHECKS
+        if ((type == GoalType.FollowTarget || type == GoalType.AttackTarget || type == GoalType.EscortTarget) 
+            && targetEntity == Entity.Null)
+        {
+            UnityEngine.Debug.LogWarning($"Goal type {type} requires a valid TargetEntity, but Entity.Null was provided.");
+        }
+#endif
     }
 
     // Проверяет, истекло ли время действия цели
