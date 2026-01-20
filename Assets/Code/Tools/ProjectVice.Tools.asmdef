@@ -1,0 +1,20 @@
+{
+    "name": "ProjectVice.Tools",
+    "rootNamespace": "ProjectVice.Tools",
+    "references": [
+        "ProjectVice.Core",
+        "ProjectVice.World",
+        "Unity.Entities",
+        "Unity.Mathematics",
+        "Unity.Collections"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": true,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

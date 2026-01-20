@@ -82,6 +82,19 @@ public struct Location : IComponentData
         this = FromGlobal(newGlobalPos3D);
     }
 
+    /// <summary>
+    /// Проверяет, находится ли заданная точка внутри чанка, на который указывает текущий Location.
+    /// </summary>
+    /// <param name="point">Глобальная 2D позиция точки (X-Z)</param>
+    /// <returns>True, если точка находится внутри чанка, иначе False</returns>
+    public bool ContainsPoint(float2 point)
+    {
+        var chunkX = (int)math.floor(point.x / ChunkConstants.CHUNK_SIZE);
+        var chunkY = (int)math.floor(point.y / ChunkConstants.CHUNK_SIZE);
+        var pointChunkId = new int2(chunkX, chunkY);
+        return pointChunkId.x == ChunkId.x && pointChunkId.y == ChunkId.y;
+    }
+
     public override string ToString()
     {
         return $"Location(Chunk:{ChunkId}, Local:{PositionInChunk})";

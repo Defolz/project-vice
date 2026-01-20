@@ -1,0 +1,24 @@
+{
+    "name": "ProjectVice.Tests",
+    "rootNamespace": "ProjectVice.Tests",
+    "references": [
+        "ProjectVice.Core",
+        "ProjectVice.World",
+        "Unity.Entities",
+        "Unity.Mathematics",
+        "Unity.Collections"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": true,
+    "overrideReferences": false,
+    "precompiledReferences": [
+        "nunit.framework"
+    ],
+    "autoReferenced": false,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

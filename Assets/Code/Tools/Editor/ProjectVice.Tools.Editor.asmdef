@@ -1,0 +1,25 @@
+{
+    "name": "ProjectVice.Tools.Editor",
+    "rootNamespace": "ProjectVice.Tools.Editor",
+    "references": [
+        "ProjectVice.Tools",
+        "ProjectVice.Core",
+        "ProjectVice.World",
+        "Unity.Entities",
+        "Unity.Mathematics",
+        "Unity.Collections"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": true,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [
+        "UNITY_EDITOR"
+    ],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

@@ -31,3 +31,17 @@
 Library/Artifacts/
 Library/ShaderCache/
 Library/ShaderCache-CG/
+
+# Local documentation and notes (do not commit)
+ALL_FILES_LIST.md
+CHEATSHEET.md
+COMPILATION_FIXES*.md
+COMPLETION_SUMMARY.md
+DOCUMENTATION_INDEX.md
+FIXES_SUMMARY.md
+NAVIGATION_*.md
+PROJECT_*.md
+QUICK_START.md
+STAGE3_PLAN.md
+TESTING_CHECKLIST.md
+VERIFICATION_GUIDE.md

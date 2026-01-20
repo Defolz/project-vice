@@ -1,4 +1,7 @@
 ﻿<Solution>
-  <Project Path="Assembly-CSharp.csproj" />
-  <Project Path="Assembly-CSharp-Editor.csproj" />
+  <Project Path="ProjectVice.Tools.csproj" />
+  <Project Path="ProjectVice.Core.csproj" />
+  <Project Path="ProjectVice.Tools.Editor.csproj" />
+  <Project Path="ProjectVice.World.csproj" />
+  <Project Path="ProjectVice.Tests.csproj" />
 </Solution>
