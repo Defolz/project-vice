@@ -15,6 +15,7 @@ public partial struct TestObstacleGeneratorSystem : ISystem
     private const int OBSTACLES_PER_CHUNK = 8;   // Увеличено с 5
     private const float MIN_RADIUS = 3f;         // Увеличено с 2f
     private const float MAX_RADIUS = 12f;        // Увеличено с 8f
+    private const float EDGE_MARGIN = 5f;        // Отступ от краёв чанка
     
     public void OnCreate(ref SystemState state)
     {
@@ -85,10 +86,10 @@ public partial struct TestObstacleGeneratorSystem : ISystem
         
         for (int i = 0; i < OBSTACLES_PER_CHUNK; i++)
         {
-            // Случайная позиция внутри чанка
+            // Случайная позиция внутри чанка с отступом от краёв
             var localPos = new float2(
-                random.NextFloat(5f, ChunkConstants.CHUNK_SIZE - 5f), // Отступ от краёв
-                random.NextFloat(5f, ChunkConstants.CHUNK_SIZE - 5f)
+                random.NextFloat(EDGE_MARGIN, ChunkConstants.CHUNK_SIZE - EDGE_MARGIN),
+                random.NextFloat(EDGE_MARGIN, ChunkConstants.CHUNK_SIZE - EDGE_MARGIN)
             );
             var worldPos = chunkWorldPos + localPos;
             

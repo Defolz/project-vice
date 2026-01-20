@@ -4,41 +4,49 @@ using Unity.Entities;
 // Система, фактически добавляющая окончательные компоненты NPC из NPCSpawnData
 // и удаляющая NPCSpawnData и NPCBufferEntities
 // Читает NPCBufferEntities для доступа к Entity буферов
-// Перемещено в SimulationSystemGroup, запускается после очистки инструкций
 [UpdateInGroup(typeof(SimulationSystemGroup))]
 [UpdateAfter(typeof(NPCBufferCleanupSystem))]
 public partial struct NPCSpawnerSystem : ISystem
 {
-    [BurstCompile]
     public void OnUpdate(ref SystemState state)
     {
-        var ecb = SystemAPI
-            .GetSingletonRW<EndInitializationEntityCommandBufferSystem.Singleton>()
-            .ValueRW
-            .CreateCommandBuffer(state.WorldUnmanaged);
+        var entityManager = state.EntityManager;
 
-        foreach (var (spawnDataRO, bufferEntitiesRO, entity)
-                in SystemAPI.Query<RefRO<NPCSpawnData>, RefRO<NPCBufferEntities>>()
-                            .WithEntityAccess())
+        // Получаем все NPC с NPCSpawnData и NPCBufferEntities
+        var query = SystemAPI.QueryBuilder()
+            .WithAll<NPCSpawnData, NPCBufferEntities>()
+            .Build();
+
+        if (query.IsEmpty) return;
+
+        var spawnDataArray = query.ToComponentDataArray<NPCSpawnData>(Unity.Collections.Allocator.Temp);
+        var bufferEntitiesArray = query.ToComponentDataArray<NPCBufferEntities>(Unity.Collections.Allocator.Temp);
+        var entities = query.ToEntityArray(Unity.Collections.Allocator.Temp);
+
+        for (int i = 0; i < entities.Length; i++)
         {
-            var data = spawnDataRO.ValueRO;
-            var buffers = bufferEntitiesRO.ValueRO;
+            var entity = entities[i];
+            var data = spawnDataArray[i];
+            var buffers = bufferEntitiesArray[i];
 
-            // ✅ ВСЁ через ECB
-            ecb.AddComponent(entity, data.Id);
-            ecb.AddComponent(entity, data.Name);
-            ecb.AddComponent(entity, data.Location);
-            ecb.AddComponent(entity, data.Faction);
-            ecb.AddComponent(entity, new Schedule(buffers.ScheduleBufferEntity));
-            ecb.AddComponent(entity, data.Goal);
-            ecb.AddComponent(entity, data.States);
-            ecb.AddComponent(entity, data.Traits);
-            ecb.AddComponent(entity, new Relationships(buffers.RelationshipsBufferEntity));
+            // Добавляем компоненты напрямую
+            entityManager.AddComponentData(entity, data.Id);
+            entityManager.AddComponentData(entity, data.Name);
+            entityManager.AddComponentData(entity, data.Location);
+            entityManager.AddComponentData(entity, data.Faction);
+            entityManager.AddComponentData(entity, new Schedule(buffers.ScheduleBufferEntity));
+            entityManager.AddComponentData(entity, data.Goal);
+            entityManager.AddComponentData(entity, data.States);
+            entityManager.AddComponentData(entity, data.Traits);
+            entityManager.AddComponentData(entity, new Relationships(buffers.RelationshipsBufferEntity));
 
-            // cleanup
-            ecb.RemoveComponent<NPCSpawnData>(entity);
-            ecb.RemoveComponent<NPCBufferEntities>(entity);
+            // Cleanup
+            entityManager.RemoveComponent<NPCSpawnData>(entity);
+            entityManager.RemoveComponent<NPCBufferEntities>(entity);
         }
-    }
 
+        spawnDataArray.Dispose();
+        bufferEntitiesArray.Dispose();
+        entities.Dispose();
+    }
 }

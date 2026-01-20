@@ -26,18 +26,27 @@ public partial struct GameStateSystem : ISystem
         var gameStateSingleton = SystemAPI.GetSingletonRW<GameStateComponent>();
         ref var gameState = ref gameStateSingleton.ValueRW;
 
-        if (SystemAPI.TryGetSingleton<GameInputComponent>(out var inputComp) && inputComp.IsPausePressed)
+        if (SystemAPI.TryGetSingletonRW<GameInputComponent>(out var inputSingleton))
         {
-            if (gameState.Value == GameStateType.Running)
+            ref var inputComp = ref inputSingleton.ValueRW;
+            
+            // Debounce: только при новом нажатии
+            if (inputComp.IsPausePressed && !inputComp.WasPausePressedLastFrame)
             {
-                gameState.Value = GameStateType.Paused;
-                gameState.IsTimePaused = true;
+                if (gameState.Value == GameStateType.Running)
+                {
+                    gameState.Value = GameStateType.Paused;
+                    gameState.IsTimePaused = true;
+                }
+                else if (gameState.Value == GameStateType.Paused)
+                {
+                    gameState.Value = GameStateType.Running;
+                    gameState.IsTimePaused = false;
+                }
             }
-            else if (gameState.Value == GameStateType.Paused)
-            {
-                gameState.Value = GameStateType.Running;
-                gameState.IsTimePaused = false;
-            }
+            
+            // Обновляем состояние предыдущего фрейма
+            inputComp.WasPausePressedLastFrame = inputComp.IsPausePressed;
         }
     }
 }

@@ -1,0 +1,974 @@
+diff --git a/Assets/Code/Core/ECS/Components/Controls/GameInputComponent.cs b/Assets/Code/Core/ECS/Components/Controls/GameInputComponent.cs
+index 29bea69..8b09338 100644
+--- a/Assets/Code/Core/ECS/Components/Controls/GameInputComponent.cs
++++ b/Assets/Code/Core/ECS/Components/Controls/GameInputComponent.cs
+@@ -1,7 +1,9 @@
+ using Unity.Entities;
++
+ public struct GameInputComponent : IComponentData
+ {
+     public bool IsPausePressed;
++    public bool WasPausePressedLastFrame; // Debounce для pause
+     public bool IsActionPressed;
+     public bool IsMenuPressed;
+ }
+\ No newline at end of file
+diff --git a/Assets/Code/Core/ECS/Components/Global/ChunkConstants.cs b/Assets/Code/Core/ECS/Components/Global/ChunkConstants.cs
+index 75d2982..1d7db95 100644
+--- a/Assets/Code/Core/ECS/Components/Global/ChunkConstants.cs
++++ b/Assets/Code/Core/ECS/Components/Global/ChunkConstants.cs
+@@ -10,4 +10,5 @@ public static class ChunkConstants
+     // Navigation Grid Settings
+     public const int NAV_GRID_SIZE = 64; // 64x64 ячеек навигационной сетки на чанк
+     public const float NAV_CELL_SIZE = CHUNK_SIZE / NAV_GRID_SIZE; // ~1.56м размер ячейки
++    public const float MAX_OBSTACLE_RADIUS = 20f; // Максимальный радиус препятствия
+ }
+\ No newline at end of file
+diff --git a/Assets/Code/Core/ECS/Components/Navigation/GridData.cs b/Assets/Code/Core/ECS/Components/Navigation/GridData.cs
+index e6a870a..41a1509 100644
+--- a/Assets/Code/Core/ECS/Components/Navigation/GridData.cs
++++ b/Assets/Code/Core/ECS/Components/Navigation/GridData.cs
+@@ -21,12 +21,4 @@ public struct GridData
+         if (x < 0 || x >= GridSize || y < 0 || y >= GridSize) return false;
+         return Cells[GetCellIndex(x, y)] == 0;
+     }
+-    
+-    // Установить состояние ячейки
+-    public void SetCell(int x, int y, byte value, ref BlobBuilder builder)
+-    {
+-        if (x < 0 || x >= GridSize || y < 0 || y >= GridSize) return;
+-        var cellsArray = builder.Allocate(ref Cells, GridSize * GridSize);
+-        cellsArray[GetCellIndex(x, y)] = value;
+-    }
+ }
+diff --git a/Assets/Code/Core/ECS/Components/Navigation/NavigationGrid.cs b/Assets/Code/Core/ECS/Components/Navigation/NavigationGrid.cs
+index da5201f..7e8b84f 100644
+--- a/Assets/Code/Core/ECS/Components/Navigation/NavigationGrid.cs
++++ b/Assets/Code/Core/ECS/Components/Navigation/NavigationGrid.cs
+@@ -9,13 +9,4 @@ public struct NavigationGrid : IComponentData
+     
+     // Проверка валидности BlobAsset
+     public bool IsValid => GridBlob.IsCreated;
+-    
+-    // Освободить ресурсы (вызывать при выгрузке чанка)
+-    public void Dispose()
+-    {
+-        if (GridBlob.IsCreated)
+-        {
+-            GridBlob.Dispose();
+-        }
+-    }
+ }
+diff --git a/Assets/Code/Core/ECS/Components/Navigation/StaticObstacle.cs b/Assets/Code/Core/ECS/Components/Navigation/StaticObstacle.cs
+index 4ed628c..ef8ca52 100644
+--- a/Assets/Code/Core/ECS/Components/Navigation/StaticObstacle.cs
++++ b/Assets/Code/Core/ECS/Components/Navigation/StaticObstacle.cs
+@@ -15,8 +15,8 @@ public struct StaticObstacle : IComponentData
+         Type = type;
+     }
+     
+-    // Проверить, перекрывается ли препятствие с точкой
+-    public bool ContainsPoint(float2 point)
++    // Проверить, находится ли точка внутри препятствия
++    public bool IsPointInside(float2 point)
+     {
+         return math.distance(Position, point) < Radius;
+     }
+diff --git a/Assets/Code/Core/ECS/Systems/Gameplay/NPCGeneration/NPCBufferCleanupSystem.cs b/Assets/Code/Core/ECS/Systems/Gameplay/NPCGeneration/NPCBufferCleanupSystem.cs
+index 3cb8cf1..4150a52 100644
+--- a/Assets/Code/Core/ECS/Systems/Gameplay/NPCGeneration/NPCBufferCleanupSystem.cs
++++ b/Assets/Code/Core/ECS/Systems/Gameplay/NPCGeneration/NPCBufferCleanupSystem.cs
+@@ -1,34 +1,41 @@
+ using Unity.Entities;
+-using Unity.Burst;
+ 
+ // Система очистки: удаляет временные Entity с инструкциями после заполнения буферов
+ // Запускается после NPCBufferFillSystem
+-// 
+-// ПОРЯДОК РАБОТЫ:
+-// 1. NPCGeneratorSystem (в InitializationSystemGroup) создает NPC с NPCSpawnData
+-// 2. NPCBufferCreationSystem (в InitializationSystemGroup) создает Entity с буферами и инструкциями
+-// 3. ECB применяется в конце InitializationSystemGroup
+-// 4. NPCBufferFillSystem (в SimulationSystemGroup) заполняет буферы из инструкций
+-// 5. NPCBufferCleanupSystem (эта, в SimulationSystemGroup) удаляет временные инструкции
+-// 6. NPCSpawnerSystem (в SimulationSystemGroup) добавляет финальные компоненты
+ [UpdateInGroup(typeof(SimulationSystemGroup))]
+ [UpdateAfter(typeof(NPCBufferFillSystem))]
+ public partial struct NPCBufferCleanupSystem : ISystem
+ {
+-    // BURST отключен для дебага - можно включить позже
+     public void OnUpdate(ref SystemState state)
+     {
+-        var ecbSingleton = SystemAPI.GetSingletonRW<EndInitializationEntityCommandBufferSystem.Singleton>(); // Или EndSimulationECB
+-        var ecb = ecbSingleton.ValueRW.CreateCommandBuffer(state.WorldUnmanaged);
++        var entityManager = state.EntityManager;
+ 
+-        foreach (var (fillInstruction, entity) in SystemAPI.Query<RefRO<NPCBufferFillInstruction>>().WithEntityAccess())
++        var query = SystemAPI.QueryBuilder()
++            .WithAll<NPCBufferFillInstruction>()
++            .Build();
++
++        if (query.IsEmpty) return;
++
++        var instructions = query.ToComponentDataArray<NPCBufferFillInstruction>(Unity.Collections.Allocator.Temp);
++        var entities = query.ToEntityArray(Unity.Collections.Allocator.Temp);
++
++        for (int i = 0; i < entities.Length; i++)
+         {
+-            var instruction = fillInstruction.ValueRO;
++            var entity = entities[i];
++            var instruction = instructions[i];
+ 
+-            // Удаляем временные Entity с инструкциями и компонент инструкций
+-            ecb.DestroyEntity(instruction.ScheduleInstructionsBufferEntity);
+-            ecb.DestroyEntity(instruction.RelationshipsInstructionsBufferEntity);
+-            ecb.RemoveComponent<NPCBufferFillInstruction>(entity);
++            // Удаляем временные Entity с инструкциями
++            if (entityManager.Exists(instruction.ScheduleInstructionsBufferEntity))
++                entityManager.DestroyEntity(instruction.ScheduleInstructionsBufferEntity);
++            
++            if (entityManager.Exists(instruction.RelationshipsInstructionsBufferEntity))
++                entityManager.DestroyEntity(instruction.RelationshipsInstructionsBufferEntity);
++            
++            // Удаляем компонент инструкций
++            entityManager.RemoveComponent<NPCBufferFillInstruction>(entity);
+         }
++
++        instructions.Dispose();
++        entities.Dispose();
+     }
+-}
+\ No newline at end of file
++}
+diff --git a/Assets/Code/Core/ECS/Systems/Gameplay/NPCGeneration/NPCBufferCreationSystem.cs b/Assets/Code/Core/ECS/Systems/Gameplay/NPCGeneration/NPCBufferCreationSystem.cs
+index 1cf77b4..388c316 100644
+--- a/Assets/Code/Core/ECS/Systems/Gameplay/NPCGeneration/NPCBufferCreationSystem.cs
++++ b/Assets/Code/Core/ECS/Systems/Gameplay/NPCGeneration/NPCBufferCreationSystem.cs
+@@ -6,64 +6,67 @@ using Random = Unity.Mathematics.Random;
+ 
+ // Система, создающая Entity для буферов Schedule и Relationships
+ // и создающая Entity с буферами для инструкций по заполнению
+-// Использует EntityCommandBuffer для всех структурных изменений
+-// Не обновляет NPCSpawnData, а создаёт NPCBufferEntities
+-[UpdateInGroup(typeof(InitializationSystemGroup))] // Или SimulationSystemGroup
++// НЕ использует ECB - создает все напрямую для избежания deferred entities
++[UpdateInGroup(typeof(InitializationSystemGroup))]
+ [UpdateAfter(typeof(NPCGeneratorSystem))]
+ public partial struct NPCBufferCreationSystem : ISystem
+ {
+-    [BurstCompile]
+     public void OnUpdate(ref SystemState state)
+     {
+-        var ecbSingleton = SystemAPI.GetSingletonRW<BeginInitializationEntityCommandBufferSystem.Singleton>();
+-        var ecb = ecbSingleton.ValueRW.CreateCommandBuffer(state.WorldUnmanaged);
+-        // Используем динамический сид на основе времени (в миллисекундах) + 1 для избежания нулевого сида
++        var entityManager = state.EntityManager;
+         var seed = (uint)(SystemAPI.Time.ElapsedTime * 1000.0) + 1;
+         var random = new Random(seed);
+ 
+-        // Итерируемся только по NPCSpawnData для чтения
+-        foreach (var (spawnDataRO, npcEntity) in SystemAPI.Query<RefRO<NPCSpawnData>>().WithEntityAccess())
++        // Получаем все NPC с NPCSpawnData
++        var query = SystemAPI.QueryBuilder()
++            .WithAll<NPCSpawnData>()
++            .WithNone<NPCBufferEntities>()
++            .Build();
++
++        if (query.IsEmpty) return;
++
++        var entities = query.ToEntityArray(Allocator.Temp);
++
++        foreach (var npcEntity in entities)
+         {
+-            var originalData = spawnDataRO.ValueRO; // Используем RefRO
++            var originalData = entityManager.GetComponentData<NPCSpawnData>(npcEntity);
+ 
+-            // 1. Создаём Entity для буфера расписания
+-            var scheduleBufferEntity = ecb.CreateEntity();
+-            ecb.AddComponent(scheduleBufferEntity, new NPCRelationshipBufferData()); // Заглушка
+-            // ДОБАВЛЯЕМ БУФЕР
+-            ecb.AddBuffer<TimeSlot>(scheduleBufferEntity); // <-- ЭТОЙ СТРОКИ НЕ ХВАТАЛО
++            // 1. Создаём Entity для буфера расписания НАПРЯМУЮ
++            var scheduleBufferEntity = entityManager.CreateEntity();
++            entityManager.AddComponentData(scheduleBufferEntity, new NPCRelationshipBufferData());
++            var scheduleBuffer = entityManager.AddBuffer<TimeSlot>(scheduleBufferEntity);
+ 
+-            // 2. Создаём Entity для буфера отношений
+-            var relationshipsBufferEntity = ecb.CreateEntity();
+-            ecb.AddComponent(relationshipsBufferEntity, new NPCRelationshipBufferData()); // Заглушка
+-            // ДОБАВЛЯЕМ БУФЕР
+-            ecb.AddBuffer<RelationshipEntry>(relationshipsBufferEntity); // <-- ЭТОЙ СТРОКИ НЕ ХВАТАЛО
++            // 2. Создаём Entity для буфера отношений НАПРЯМУЮ
++            var relationshipsBufferEntity = entityManager.CreateEntity();
++            entityManager.AddComponentData(relationshipsBufferEntity, new NPCRelationshipBufferData());
++            var relationshipsBuffer = entityManager.AddBuffer<RelationshipEntry>(relationshipsBufferEntity);
+ 
+-            // 3. Создаём Entity для *инструкций* по заполнению буфера расписания
+-            var scheduleInstructionEntity = ecb.CreateEntity();
+-            ecb.AddComponent(scheduleInstructionEntity, new NPCRelationshipBufferData()); // Заглушка
+-            var scheduleInstructionBuffer = ecb.AddBuffer<TimeSlot>(scheduleInstructionEntity);
+-            scheduleInstructionBuffer.Add(new TimeSlot(9, 11, 1)); // 9-11: Работа
+-            scheduleInstructionBuffer.Add(new TimeSlot(12, 13, 2)); // 12-13: Обед
+-            scheduleInstructionBuffer.Add(new TimeSlot(18, 22, 3)); // 18-22: Дома
++            // 3. Создаём Entity для инструкций расписания НАПРЯМУЮ
++            var scheduleInstructionEntity = entityManager.CreateEntity();
++            entityManager.AddComponentData(scheduleInstructionEntity, new NPCRelationshipBufferData());
++            var scheduleInstructionBuffer = entityManager.AddBuffer<TimeSlot>(scheduleInstructionEntity);
++            scheduleInstructionBuffer.Add(new TimeSlot(9, 11, 1));
++            scheduleInstructionBuffer.Add(new TimeSlot(12, 13, 2));
++            scheduleInstructionBuffer.Add(new TimeSlot(18, 22, 3));
+ 
+-            // 4. Создаём Entity для *инструкций* по заполнению буфера отношений
+-            var relationshipsInstructionEntity = ecb.CreateEntity();
+-            ecb.AddComponent(relationshipsInstructionEntity, new NPCRelationshipBufferData()); // Заглушка
+-            var relationshipsInstructionBuffer = ecb.AddBuffer<RelationshipEntry>(relationshipsInstructionEntity);
+-            relationshipsInstructionBuffer.Add(new RelationshipEntry(originalData.Id.Value, random.NextFloat() * 2 - 1)); // Используем ID этого NPC
+-            relationshipsInstructionBuffer.Add(new RelationshipEntry(random.NextUInt(), random.NextFloat() * 2 - 1)); // Используем NextUInt()
++            // 4. Создаём Entity для инструкций отношений НАПРЯМУЮ
++            var relationshipsInstructionEntity = entityManager.CreateEntity();
++            entityManager.AddComponentData(relationshipsInstructionEntity, new NPCRelationshipBufferData());
++            var relationshipsInstructionBuffer = entityManager.AddBuffer<RelationshipEntry>(relationshipsInstructionEntity);
++            relationshipsInstructionBuffer.Add(new RelationshipEntry(originalData.Id.Value, random.NextFloat() * 2 - 1));
++            relationshipsInstructionBuffer.Add(new RelationshipEntry(random.NextUInt(), random.NextFloat() * 2 - 1));
+ 
+-            // 5. Создаём компонент NPCBufferEntities и добавляем его к NPC Entity
+-            var bufferEntities = new NPCBufferEntities(scheduleBufferEntity, relationshipsBufferEntity);
+-            ecb.AddComponent(npcEntity, bufferEntities); // <-- Добавляем новый компонент
++            // 5. Добавляем NPCBufferEntities к NPC
++            entityManager.AddComponentData(npcEntity, new NPCBufferEntities(scheduleBufferEntity, relationshipsBufferEntity));
+ 
+-            // 6. Создаём компонент инструкций для следующей системы, передавая Entity с буферами инструкций
+-            var fillInstruction = new NPCBufferFillInstruction
++            // 6. Добавляем инструкции
++            entityManager.AddComponentData(npcEntity, new NPCBufferFillInstruction
+             {
+                 ScheduleInstructionsBufferEntity = scheduleInstructionEntity,
+                 RelationshipsInstructionsBufferEntity = relationshipsInstructionEntity
+-            };
+-            ecb.AddComponent(npcEntity, fillInstruction); // <-- Добавляем инструкции
++            });
+         }
++
++        entities.Dispose();
+     }
+-}
+\ No newline at end of file
++}
+diff --git a/Assets/Code/Core/ECS/Systems/Gameplay/NPCGeneration/NPCGeneratorSystem.cs b/Assets/Code/Core/ECS/Systems/Gameplay/NPCGeneration/NPCGeneratorSystem.cs
+index edddb80..3ade92a 100644
+--- a/Assets/Code/Core/ECS/Systems/Gameplay/NPCGeneration/NPCGeneratorSystem.cs
++++ b/Assets/Code/Core/ECS/Systems/Gameplay/NPCGeneration/NPCGeneratorSystem.cs
+@@ -63,8 +63,8 @@ public partial struct NPCGeneratorSystem : ISystem
+         }
+ 
+         // Подсчитываем существующих NPC (только те, которые уже полностью созданы)
+-        // Используем SystemAPI.Query для получения всех NPC с Location, но без NPCSpawnData
+-        foreach (var (location, entity) in SystemAPI.Query<RefRO<Location>>().WithEntityAccess())
++        // Используем SystemAPI.Query для получения всех NPC с Location, но без NPCSpawnData и Prefab
++        foreach (var (location, entity) in SystemAPI.Query<RefRO<Location>>().WithEntityAccess().WithNone<Prefab>())
+         {
+             // Пропускаем NPC, которые еще в процессе спавна (имеют NPCSpawnData)
+             if (!SystemAPI.HasComponent<NPCSpawnData>(entity))
+@@ -76,10 +76,18 @@ public partial struct NPCGeneratorSystem : ISystem
+             }
+         }
+ 
+-        // 4. Для каждого загруженного чанка решаем, сколько NPC в нём создать (только недостающих)
++        // 4. Для каждого загруженного чанка решаем, сколько NPC в нём создать
+         var spawnRequests = new NativeList<NPCSpawnData>(Allocator.Temp);
++        var chunksToMark = new NativeList<(Entity, int)>(Allocator.Temp); // (chunkEntity, count)
++        
+         foreach (var chunkId in loadedChunks)
+         {
++            // Проверяем, не сгенерировали ли уже NPC для этого чанка
++            var chunkEntity = GetChunkEntity(chunkMapBuffer, chunkId);
++            if (chunkEntity != Entity.Null && entityManager.HasComponent<NPCGenerated>(chunkEntity))
++            {
++                continue; // Чанк уже сгенерирован
++            }
+             // Подсчитываем, сколько NPC уже есть в чанке
+             var currentCount = currentNPCCounts.TryGetValue(chunkId, out var count) ? count : 0;
+             
+@@ -92,26 +100,46 @@ public partial struct NPCGeneratorSystem : ISystem
+             
+             for (int i = 0; i < numNPCsToCreate; i++)
+             {
+-                // 5. Генерируем данные для одного NPC (без Entity буферов)
++                // 5. Генерируем данные для одного NPC
+                 var npcData = GenerateNPCData(ref random, chunkId, entityManager, settings);
+                 spawnRequests.Add(npcData);
+             }
++            
++            // Отмечаем чанк для маркировки
++            if (chunkEntity != Entity.Null && numNPCsToCreate > 0)
++            {
++                chunksToMark.Add((chunkEntity, numNPCsToCreate));
++            }
+         }
+ 
+-        // 6. Отправляем запросы на спавн (например, через EntityCommandBuffer)
+-        var ecb = new EntityCommandBuffer(Allocator.Temp);
++        // 6. Отправляем запросы на спавн НАПРЯМУЮ
+         foreach (var spawnData in spawnRequests)
+         {
+-            var npcEntity = ecb.CreateEntity();
+-            ecb.AddComponent(npcEntity, spawnData); // Добавляем весь набор данных как IComponentData
+-            // Компоненты будут установлены в NPCBufferCreationSystem или NPCSpawnerSystem
++            var npcEntity = entityManager.CreateEntity();
++            entityManager.AddComponentData(npcEntity, spawnData);
++        }
++        
++        // Маркируем чанки как сгенерированные
++        foreach (var (chunkEntity, count) in chunksToMark)
++        {
++            entityManager.AddComponentData(chunkEntity, new NPCGenerated(count));
+         }
+-        ecb.Playback(entityManager);
+-        ecb.Dispose();
+ 
+         loadedChunks.Dispose();
+         currentNPCCounts.Dispose();
+         spawnRequests.Dispose();
++        chunksToMark.Dispose();
++    }
++    
++    // Получить Entity чанка по ID
++    private static Entity GetChunkEntity(DynamicBuffer<ChunkMapEntry> buffer, int2 chunkId)
++    {
++        for (int i = 0; i < buffer.Length; i++)
++        {
++            if (buffer[i].Id.Equals(chunkId))
++                return buffer[i].Entity;
++        }
++        return Entity.Null;
+     }
+ 
+     // Вспомогательная функция для генерации данных NPC
+diff --git a/Assets/Code/Core/ECS/Systems/Gameplay/NPCGeneration/NPCSpawnerSystem.cs b/Assets/Code/Core/ECS/Systems/Gameplay/NPCGeneration/NPCSpawnerSystem.cs
+index b8e1d14..c4b236a 100644
+--- a/Assets/Code/Core/ECS/Systems/Gameplay/NPCGeneration/NPCSpawnerSystem.cs
++++ b/Assets/Code/Core/ECS/Systems/Gameplay/NPCGeneration/NPCSpawnerSystem.cs
+@@ -4,41 +4,49 @@ using Unity.Entities;
+ // Система, фактически добавляющая окончательные компоненты NPC из NPCSpawnData
+ // и удаляющая NPCSpawnData и NPCBufferEntities
+ // Читает NPCBufferEntities для доступа к Entity буферов
+-// Перемещено в SimulationSystemGroup, запускается после очистки инструкций
+ [UpdateInGroup(typeof(SimulationSystemGroup))]
+ [UpdateAfter(typeof(NPCBufferCleanupSystem))]
+ public partial struct NPCSpawnerSystem : ISystem
+ {
+-    [BurstCompile]
+     public void OnUpdate(ref SystemState state)
+     {
+-        var ecb = SystemAPI
+-            .GetSingletonRW<EndInitializationEntityCommandBufferSystem.Singleton>()
+-            .ValueRW
+-            .CreateCommandBuffer(state.WorldUnmanaged);
+-
+-        foreach (var (spawnDataRO, bufferEntitiesRO, entity)
+-                in SystemAPI.Query<RefRO<NPCSpawnData>, RefRO<NPCBufferEntities>>()
+-                            .WithEntityAccess())
++        var entityManager = state.EntityManager;
++
++        // Получаем все NPC с NPCSpawnData и NPCBufferEntities
++        var query = SystemAPI.QueryBuilder()
++            .WithAll<NPCSpawnData, NPCBufferEntities>()
++            .Build();
++
++        if (query.IsEmpty) return;
++
++        var spawnDataArray = query.ToComponentDataArray<NPCSpawnData>(Unity.Collections.Allocator.Temp);
++        var bufferEntitiesArray = query.ToComponentDataArray<NPCBufferEntities>(Unity.Collections.Allocator.Temp);
++        var entities = query.ToEntityArray(Unity.Collections.Allocator.Temp);
++
++        for (int i = 0; i < entities.Length; i++)
+         {
+-            var data = spawnDataRO.ValueRO;
+-            var buffers = bufferEntitiesRO.ValueRO;
+-
+-            // ✅ ВСЁ через ECB
+-            ecb.AddComponent(entity, data.Id);
+-            ecb.AddComponent(entity, data.Name);
+-            ecb.AddComponent(entity, data.Location);
+-            ecb.AddComponent(entity, data.Faction);
+-            ecb.AddComponent(entity, new Schedule(buffers.ScheduleBufferEntity));
+-            ecb.AddComponent(entity, data.Goal);
+-            ecb.AddComponent(entity, data.States);
+-            ecb.AddComponent(entity, data.Traits);
+-            ecb.AddComponent(entity, new Relationships(buffers.RelationshipsBufferEntity));
+-
+-            // cleanup
+-            ecb.RemoveComponent<NPCSpawnData>(entity);
+-            ecb.RemoveComponent<NPCBufferEntities>(entity);
++            var entity = entities[i];
++            var data = spawnDataArray[i];
++            var buffers = bufferEntitiesArray[i];
++
++            // Добавляем компоненты напрямую
++            entityManager.AddComponentData(entity, data.Id);
++            entityManager.AddComponentData(entity, data.Name);
++            entityManager.AddComponentData(entity, data.Location);
++            entityManager.AddComponentData(entity, data.Faction);
++            entityManager.AddComponentData(entity, new Schedule(buffers.ScheduleBufferEntity));
++            entityManager.AddComponentData(entity, data.Goal);
++            entityManager.AddComponentData(entity, data.States);
++            entityManager.AddComponentData(entity, data.Traits);
++            entityManager.AddComponentData(entity, new Relationships(buffers.RelationshipsBufferEntity));
++
++            // Cleanup
++            entityManager.RemoveComponent<NPCSpawnData>(entity);
++            entityManager.RemoveComponent<NPCBufferEntities>(entity);
+         }
+-    }
+ 
+-}
+\ No newline at end of file
++        spawnDataArray.Dispose();
++        bufferEntitiesArray.Dispose();
++        entities.Dispose();
++    }
++}
+diff --git a/Assets/Code/Core/ECS/Systems/Global/GameStateSystem.cs b/Assets/Code/Core/ECS/Systems/Global/GameStateSystem.cs
+index d366438..2638879 100644
+--- a/Assets/Code/Core/ECS/Systems/Global/GameStateSystem.cs
++++ b/Assets/Code/Core/ECS/Systems/Global/GameStateSystem.cs
+@@ -26,18 +26,27 @@ public partial struct GameStateSystem : ISystem
+         var gameStateSingleton = SystemAPI.GetSingletonRW<GameStateComponent>();
+         ref var gameState = ref gameStateSingleton.ValueRW;
+ 
+-        if (SystemAPI.TryGetSingleton<GameInputComponent>(out var inputComp) && inputComp.IsPausePressed)
++        if (SystemAPI.TryGetSingletonRW<GameInputComponent>(out var inputSingleton))
+         {
+-            if (gameState.Value == GameStateType.Running)
++            ref var inputComp = ref inputSingleton.ValueRW;
++            
++            // Debounce: только при новом нажатии
++            if (inputComp.IsPausePressed && !inputComp.WasPausePressedLastFrame)
+             {
+-                gameState.Value = GameStateType.Paused;
+-                gameState.IsTimePaused = true;
+-            }
+-            else if (gameState.Value == GameStateType.Paused)
+-            {
+-                gameState.Value = GameStateType.Running;
+-                gameState.IsTimePaused = false;
++                if (gameState.Value == GameStateType.Running)
++                {
++                    gameState.Value = GameStateType.Paused;
++                    gameState.IsTimePaused = true;
++                }
++                else if (gameState.Value == GameStateType.Paused)
++                {
++                    gameState.Value = GameStateType.Running;
++                    gameState.IsTimePaused = false;
++                }
+             }
++            
++            // Обновляем состояние предыдущего фрейма
++            inputComp.WasPausePressedLastFrame = inputComp.IsPausePressed;
+         }
+     }
+ }
+\ No newline at end of file
+diff --git a/Assets/Code/Core/ECS/Systems/Navigation/NavigationGridBuildSystem.cs b/Assets/Code/Core/ECS/Systems/Navigation/NavigationGridBuildSystem.cs
+index 364c65f..c733563 100644
+--- a/Assets/Code/Core/ECS/Systems/Navigation/NavigationGridBuildSystem.cs
++++ b/Assets/Code/Core/ECS/Systems/Navigation/NavigationGridBuildSystem.cs
+@@ -13,30 +13,52 @@ public partial struct NavigationGridBuildSystem : ISystem
+     
+     public void OnCreate(ref SystemState state)
+     {
+-        // Query для чанков без NavigationGrid (новые чанки)
++        // Query для чанков без NavigationGrid (новые чанки), исключая префабы
+         newChunksQuery = new EntityQueryBuilder(Allocator.Temp)
+             .WithAll<Chunk>()
+-            .WithNone<NavigationGrid>()
++            .WithNone<NavigationGrid, Prefab>()
+             .Build(ref state);
+         
+         state.RequireForUpdate(newChunksQuery);
+     }
+     
++    public void OnDestroy(ref SystemState state)
++    {
++        // Очищаем все BlobAssets при выходе из Play Mode
++        var gridQuery = new EntityQueryBuilder(Allocator.Temp)
++            .WithAll<NavigationGrid>()
++            .Build(ref state);
++        
++        if (!gridQuery.IsEmpty)
++        {
++            var grids = gridQuery.ToComponentDataArray<NavigationGrid>(Allocator.Temp);
++            
++            for (int i = 0; i < grids.Length; i++)
++            {
++                if (grids[i].IsValid)
++                {
++                    grids[i].GridBlob.Dispose();
++                }
++            }
++            
++            grids.Dispose();
++        }
++    }
++    
+     [BurstCompile]
+     public void OnUpdate(ref SystemState state)
+     {
+         var entityManager = state.EntityManager;
+-        var ecb = new EntityCommandBuffer(Allocator.TempJob);
+         
+         // Получаем все новые чанки
+-        var chunks = newChunksQuery.ToComponentDataArray<Chunk>(Allocator.TempJob);
+-        var chunkEntities = newChunksQuery.ToEntityArray(Allocator.TempJob);
++        var chunks = newChunksQuery.ToComponentDataArray<Chunk>(Allocator.Temp);
++        var chunkEntities = newChunksQuery.ToEntityArray(Allocator.Temp);
+         
+         // Получаем все StaticObstacle в мире
+         var obstacleQuery = SystemAPI.QueryBuilder()
+             .WithAll<StaticObstacle>()
+             .Build();
+-        var allObstacles = obstacleQuery.ToComponentDataArray<StaticObstacle>(Allocator.TempJob);
++        var allObstacles = obstacleQuery.ToComponentDataArray<StaticObstacle>(Allocator.Temp);
+         
+         // Обрабатываем каждый новый чанк
+         for (int i = 0; i < chunks.Length; i++)
+@@ -48,13 +70,13 @@ public partial struct NavigationGridBuildSystem : ISystem
+             if (chunk.State != ChunkState.Loaded) continue;
+             
+             // Фильтруем препятствия, которые влияют на этот чанк
+-            var relevantObstacles = GetObstaclesForChunk(chunk.Id, allObstacles, Allocator.TempJob);
++            var relevantObstacles = GetObstaclesForChunk(chunk.Id, allObstacles, Allocator.Temp);
+             
+             // Создаём BlobAsset с навигационной сеткой
+             var gridBlob = CreateNavigationGrid(chunk.Id, relevantObstacles.AsArray());
+             
+-            // Добавляем NavigationGrid компонент
+-            ecb.AddComponent(chunkEntity, new NavigationGrid
++            // Добавляем NavigationGrid компонент НАПРЯМУЮ
++            entityManager.AddComponentData(chunkEntity, new NavigationGrid
+             {
+                 GridBlob = gridBlob,
+                 ChunkId = chunk.Id
+@@ -63,14 +85,11 @@ public partial struct NavigationGridBuildSystem : ISystem
+             // Создаём debug данные
+             ref var gridData = ref gridBlob.Value;
+             var debugData = NavigationDebugData.FromGridData(ref gridData, relevantObstacles.Length);
+-            ecb.AddComponent(chunkEntity, debugData);
++            entityManager.AddComponentData(chunkEntity, debugData);
+             
+             relevantObstacles.Dispose();
+         }
+         
+-        ecb.Playback(entityManager);
+-        ecb.Dispose();
+-        
+         chunks.Dispose();
+         chunkEntities.Dispose();
+         allObstacles.Dispose();
+@@ -161,7 +180,7 @@ public partial struct NavigationGridBuildSystem : ISystem
+         );
+         
+         // Margin для учёта препятствий, которые могут влиять на края чанка
+-        const float margin = 20f; // Максимальный радиус препятствия
++        var margin = ChunkConstants.MAX_OBSTACLE_RADIUS;
+         
+         for (int i = 0; i < allObstacles.Length; i++)
+         {
+diff --git a/Assets/Code/Core/ECS/Systems/Navigation/NavigationGridCleanupSystem.cs b/Assets/Code/Core/ECS/Systems/Navigation/NavigationGridCleanupSystem.cs
+index 528585c..1f0e712 100644
+--- a/Assets/Code/Core/ECS/Systems/Navigation/NavigationGridCleanupSystem.cs
++++ b/Assets/Code/Core/ECS/Systems/Navigation/NavigationGridCleanupSystem.cs
+@@ -7,32 +7,49 @@ using Unity.Entities;
+ [UpdateInGroup(typeof(ChunkManagementGroup))]
+ public partial struct NavigationGridCleanupSystem : ISystem
+ {
++    private EntityQuery cleanupQuery;
++    
++    public void OnCreate(ref SystemState state)
++    {
++        // Query для entities с NavigationGrid но без Chunk (чанк был удалён)
++        cleanupQuery = new EntityQueryBuilder(Allocator.Temp)
++            .WithAll<NavigationGrid>()
++            .WithNone<Chunk>()
++            .Build(ref state);
++    }
++    
+     [BurstCompile]
+     public void OnUpdate(ref SystemState state)
+     {
+         var entityManager = state.EntityManager;
+         
+-        // Query для чанков, которые помечены для выгрузки и имеют NavigationGrid
+-        var unloadingQuery = SystemAPI.QueryBuilder()
+-            .WithAll<NavigationGrid>()
+-            .WithNone<Chunk>() // Чанки без Chunk компонента = уже удалены
+-            .Build();
++        // Проверяем есть ли entities для cleanup
++        if (cleanupQuery.IsEmpty) return;
+         
+-        var grids = unloadingQuery.ToComponentDataArray<NavigationGrid>(Allocator.Temp);
+-        var gridEntities = unloadingQuery.ToEntityArray(Allocator.Temp);
++        var grids = cleanupQuery.ToComponentDataArray<NavigationGrid>(Allocator.Temp);
++        var entities = cleanupQuery.ToEntityArray(Allocator.Temp);
+         
++        // Освобождаем BlobAssets и удаляем компоненты НАПРЯМУЮ
+         for (int i = 0; i < grids.Length; i++)
+         {
+             var grid = grids[i];
+             
+-            // Освобождаем BlobAsset
++            // Dispose BlobAsset
+             if (grid.IsValid)
+             {
+-                grid.Dispose();
++                grid.GridBlob.Dispose();
++            }
++            
++            // Удаляем NavigationGrid компонент
++            entityManager.RemoveComponent<NavigationGrid>(entities[i]);
++            
++            if (entityManager.HasComponent<NavigationDebugData>(entities[i]))
++            {
++                entityManager.RemoveComponent<NavigationDebugData>(entities[i]);
+             }
+         }
+         
+         grids.Dispose();
+-        gridEntities.Dispose();
++        entities.Dispose();
+     }
+ }
+diff --git a/Assets/Code/Core/ECS/Systems/Navigation/NavigationGridUpdateSystem.cs b/Assets/Code/Core/ECS/Systems/Navigation/NavigationGridUpdateSystem.cs
+index a1f62e6..383a45e 100644
+--- a/Assets/Code/Core/ECS/Systems/Navigation/NavigationGridUpdateSystem.cs
++++ b/Assets/Code/Core/ECS/Systems/Navigation/NavigationGridUpdateSystem.cs
+@@ -70,7 +70,7 @@ public partial struct NavigationGridUpdateSystem : ISystem
+             // Dispose старого BlobAsset
+             if (grid.IsValid)
+             {
+-                grid.Dispose();
++                grid.GridBlob.Dispose();
+             }
+             
+             // Создаём новый BlobAsset
+@@ -179,7 +179,7 @@ public partial struct NavigationGridUpdateSystem : ISystem
+             ChunkConstants.CHUNK_SIZE
+         );
+         
+-        const float margin = 20f;
++        var margin = ChunkConstants.MAX_OBSTACLE_RADIUS;
+         
+         for (int i = 0; i < allObstacles.Length; i++)
+         {
+diff --git a/Assets/Code/Core/ECS/Systems/Navigation/TestObstacleGeneratorSystem.cs b/Assets/Code/Core/ECS/Systems/Navigation/TestObstacleGeneratorSystem.cs
+index 51b7e71..ea20ecb 100644
+--- a/Assets/Code/Core/ECS/Systems/Navigation/TestObstacleGeneratorSystem.cs
++++ b/Assets/Code/Core/ECS/Systems/Navigation/TestObstacleGeneratorSystem.cs
+@@ -15,6 +15,7 @@ public partial struct TestObstacleGeneratorSystem : ISystem
+     private const int OBSTACLES_PER_CHUNK = 8;   // Увеличено с 5
+     private const float MIN_RADIUS = 3f;         // Увеличено с 2f
+     private const float MAX_RADIUS = 12f;        // Увеличено с 8f
++    private const float EDGE_MARGIN = 5f;        // Отступ от краёв чанка
+     
+     public void OnCreate(ref SystemState state)
+     {
+@@ -85,10 +86,10 @@ public partial struct TestObstacleGeneratorSystem : ISystem
+         
+         for (int i = 0; i < OBSTACLES_PER_CHUNK; i++)
+         {
+-            // Случайная позиция внутри чанка
++            // Случайная позиция внутри чанка с отступом от краёв
+             var localPos = new float2(
+-                random.NextFloat(5f, ChunkConstants.CHUNK_SIZE - 5f), // Отступ от краёв
+-                random.NextFloat(5f, ChunkConstants.CHUNK_SIZE - 5f)
++                random.NextFloat(EDGE_MARGIN, ChunkConstants.CHUNK_SIZE - EDGE_MARGIN),
++                random.NextFloat(EDGE_MARGIN, ChunkConstants.CHUNK_SIZE - EDGE_MARGIN)
+             );
+             var worldPos = chunkWorldPos + localPos;
+             
+diff --git a/Assets/Code/Tools/ProjectVice.Tools.asmdef b/Assets/Code/Tools/ProjectVice.Tools.asmdef
+index 723e963..b9b627e 100644
+--- a/Assets/Code/Tools/ProjectVice.Tools.asmdef
++++ b/Assets/Code/Tools/ProjectVice.Tools.asmdef
+@@ -6,7 +6,8 @@
+         "ProjectVice.World",
+         "Unity.Entities",
+         "Unity.Mathematics",
+-        "Unity.Collections"
++        "Unity.Collections",
++        "Unity.Burst"
+     ],
+     "includePlatforms": [],
+     "excludePlatforms": [],
+diff --git a/Assets/Code/Tools/README_DEBUG_TOOLS.md b/Assets/Code/Tools/README_DEBUG_TOOLS.md
+index aa39588..9785d78 100644
+--- a/Assets/Code/Tools/README_DEBUG_TOOLS.md
++++ b/Assets/Code/Tools/README_DEBUG_TOOLS.md
+@@ -241,5 +241,5 @@
+ ---
+ 
+ **Версия:** 1.0
+-**Дата:** January 2026
++**Дата:**
+ **Проект:** PROJECT-VICE
+diff --git a/Assets/Code/World/Generation/Systems/ChunkManagementSystem.cs b/Assets/Code/World/Generation/Systems/ChunkManagementSystem.cs
+index bab309a..26d0ba9 100644
+--- a/Assets/Code/World/Generation/Systems/ChunkManagementSystem.cs
++++ b/Assets/Code/World/Generation/Systems/ChunkManagementSystem.cs
+@@ -3,43 +3,37 @@ using Unity.Collections;
+ using Unity.Entities;
+ using Unity.Mathematics;
+ 
+-// Система управления загрузкой, выгрузкой и жизненным циклом чанков (теперь 2D X-Y)
+-[UpdateInGroup(typeof(InitializationSystemGroup))] // Или SimulationSystemGroup, зависит от логики
++// Система управления загрузкой, выгрузкой и жизненным циклом чанков (2D X-Y)
++[UpdateInGroup(typeof(InitializationSystemGroup))]
+ public partial struct ChunkManagementSystem : ISystem
+ {
+-    // Центральная точка мира (2D X-Y), вокруг которой загружаются чанки (временно - фиксированная)
+-    // В реальности это будет позиция игрока или центр активной симуляции.
+-    private static readonly float2 CENTER_POINT = new float2(0, 0);
+-
+     [BurstCompile]
+     public void OnCreate(ref SystemState state)
+     {
+         var entityManager = state.EntityManager;
+-        // 1. Создаём Prefab для чанков (в реальности это может быть загружено из ScriptableObject или другого источника)
++        
++        // Проверяем, не создан ли уже singleton
++        if (SystemAPI.HasSingleton<ChunkMapSingleton>())
++            return;
++        
++        // 1. Создаём Prefab для чанков
+         var chunkPrefab = entityManager.CreateEntity();
+         entityManager.AddComponent<Chunk>(chunkPrefab);
+-        // ... добавить другие компоненты, характерные для содержимого чанка (здания, декорации и т.п.)
++        entityManager.AddComponent<Prefab>(chunkPrefab);
+ 
+         // 2. Создаём Entity для хранения буфера ChunkMapEntry
+         var mapDataEntity = entityManager.CreateEntity();
+         entityManager.AddComponentData(mapDataEntity, new ChunkMapBufferData());
+-        // --- ДОБАВЛЕНИЕ БУФЕРА ПРЯМО ТУТ ---
+         entityManager.AddBuffer<ChunkMapEntry>(mapDataEntity);
+-        // -----------------------------------
+ 
+         // 3. Создаём синглтон ChunkMapSingleton
+         var singletonEntity = entityManager.CreateEntity();
+         entityManager.AddComponentData(singletonEntity, new ChunkMapSingleton(chunkPrefab, mapDataEntity));
+-
+-        // Логика инициализации завершена
+-        // Debug.Log("ChunkManagementSystem initialized."); // Убрали
+     }
+ 
+     [BurstCompile]
+     public void OnDestroy(ref SystemState state)
+     {
+-        // Освобождение ресурсов, если необходимо
+-        // Буферы и другие NativeContainers, прикреплённые к Entity, удалятся автоматически при удалении Entity
+     }
+ 
+     [BurstCompile]
+@@ -56,99 +50,114 @@ public partial struct ChunkManagementSystem : ISystem
+         // 2. Получаем буфер с картой чанков
+         var chunkMapBuffer = entityManager.GetBuffer<ChunkMapEntry>(mapDataEntity);
+ 
+-        // 3. Определяем центр и границы зоны загрузки (в 2D X-Y)
+-        var centerChunkId = WorldToChunkId(CENTER_POINT);
++        // 3. Определяем центр и границы зоны загрузки
++        var centerPoint = SystemAPI.HasSingleton<PlayerPosition>() 
++            ? SystemAPI.GetSingleton<PlayerPosition>().Value 
++            : float2.zero;
++        
++        var centerChunkId = WorldToChunkId(centerPoint);
+         var minChunkId = centerChunkId - new int2(viewDistance, viewDistance);
+         var maxChunkId = centerChunkId + new int2(viewDistance, viewDistance);
+ 
+-        // 4. Создаём список чанков, которые должны быть загружены
+-        var requiredChunks = new NativeList<int2>(Allocator.Temp);
++        // 4. Создаём HashSet требуемых чанков
++        int estimatedCount = (viewDistance * 2 + 1) * (viewDistance * 2 + 1);
++        var requiredChunksSet = new NativeHashSet<int2>(estimatedCount, Allocator.Temp);
++        
+         for (int x = minChunkId.x; x <= maxChunkId.x; x++)
+         {
+             for (int y = minChunkId.y; y <= maxChunkId.y; y++)
+             {
+-                var id = new int2(x, y);
+-                requiredChunks.Add(id);
++                requiredChunksSet.Add(new int2(x, y));
+             }
+         }
+ 
+-        // 5. Создаём CommandBuffer для безопасного изменения ECS структуры
+-        var ecb = new EntityCommandBuffer(Allocator.Temp);
+-
+-        // 6. Создаем HashMap для быстрого поиска (O(1) вместо O(n))
++        // 5. Создаём HashMap существующих чанков
+         var existingChunks = new NativeHashMap<int2, ChunkMapEntry>(chunkMapBuffer.Length, Allocator.Temp);
+         for (int i = 0; i < chunkMapBuffer.Length; i++)
+         {
+             existingChunks.TryAdd(chunkMapBuffer[i].Id, chunkMapBuffer[i]);
+         }
+ 
+-        // Проверяем, какие чанки нужно создать (загрузить)
+-        foreach (var id in requiredChunks)
++        // 6. Список чанков для добавления в буфер ПОСЛЕ Playback
++        var chunksToAdd = new NativeList<int2>(Allocator.Temp);
++
++        var ecb = new EntityCommandBuffer(Allocator.Temp);
++        try
+         {
+-            if (existingChunks.TryGetValue(id, out var entry))
++            // === ЗАГРУЗКА НОВЫХ ЧАНКОВ ===
++            foreach (var chunkId in requiredChunksSet)
+             {
+-                // Чанк уже существует, проверяем состояние
+-                if (entry.State == ChunkState.Unloaded)
++                if (existingChunks.TryGetValue(chunkId, out var entry))
+                 {
+-                    ecb.SetComponent(entry.Entity, new Chunk(id, ChunkIdToWorldPosition(id), ChunkState.Loaded));
+-                    // Обновляем запись в буфере
+-                    for (int i = 0; i < chunkMapBuffer.Length; i++)
++                    // Чанк существует - проверяем состояние
++                    if (entry.State == ChunkState.Unloaded)
+                     {
+-                        if (chunkMapBuffer[i].Id.Equals(id))
++                        ecb.SetComponent(entry.Entity, new Chunk(
++                            chunkId, 
++                            ChunkIdToWorldPosition(chunkId), 
++                            ChunkState.Loaded
++                        ));
++                        
++                        // Обновляем в буфере
++                        for (int i = 0; i < chunkMapBuffer.Length; i++)
+                         {
+-                            chunkMapBuffer[i] = new ChunkMapEntry(id, entry.Entity, ChunkState.Loaded);
+-                            break;
++                            if (chunkMapBuffer[i].Id.Equals(chunkId))
++                            {
++                                chunkMapBuffer[i] = new ChunkMapEntry(chunkId, entry.Entity, ChunkState.Loaded);
++                                break;
++                            }
+                         }
+                     }
+                 }
++                else
++                {
++                    // Чанк не существует - создаём новый НАПРЯМУЮ
++                    var newChunkEntity = entityManager.Instantiate(chunkPrefab);
++                    entityManager.SetComponentData(newChunkEntity, new Chunk(
++                        chunkId, 
++                        ChunkIdToWorldPosition(chunkId), 
++                        ChunkState.Loaded
++                    ));
++                    
++                    // Сразу добавляем в буфер (entity уже реализован)
++                    chunkMapBuffer.Add(new ChunkMapEntry(
++                        chunkId, 
++                        newChunkEntity, 
++                        ChunkState.Loaded
++                    ));
++                }
+             }
+-            else
++            
++            // === ВЫГРУЗКА НЕНУЖНЫХ ЧАНКОВ ===
++            for (int i = chunkMapBuffer.Length - 1; i >= 0; i--)
+             {
+-                // Чанк не существует, создаём его
+-                var newChunkEntity = ecb.Instantiate(chunkPrefab);
+-                ecb.SetComponent(newChunkEntity, new Chunk(id, ChunkIdToWorldPosition(id), ChunkState.Loaded));
+-
+-                // Добавляем запись в буфер (через ECB, если буфер будет обновляться в другой системе)
+-                // Для простоты в этой системе добавляем сразу в буфер
+-                chunkMapBuffer.Add(new ChunkMapEntry(id, newChunkEntity, ChunkState.Loaded));
++                var entry = chunkMapBuffer[i];
+                 
+-                // Debug.Log($"Created and loaded chunk {id}"); // Убрали
++                if (!requiredChunksSet.Contains(entry.Id) && entry.State == ChunkState.Loaded)
++                {
++                    if (entityManager.Exists(entry.Entity))
++                    {
++                        ecb.DestroyEntity(entry.Entity);
++                        chunkMapBuffer.RemoveAt(i);
++                    }
++                    else
++                    {
++                        chunkMapBuffer.RemoveAt(i);
++                    }
++                }
+             }
++            
++            ecb.Playback(entityManager);
+         }
+-
+-        // 7. Создаем HashSet для быстрой проверки нужных чанков
+-        var requiredChunksSet = new NativeHashSet<int2>(requiredChunks.Length, Allocator.Temp);
+-        foreach (var id in requiredChunks)
++        finally
+         {
+-            requiredChunksSet.Add(id);
++            ecb.Dispose();
++            existingChunks.Dispose();
++            requiredChunksSet.Dispose();
++            chunksToAdd.Dispose();
+         }
+-
+-        // Проверяем, какие чанки нужно выгрузить
+-        for (int i = chunkMapBuffer.Length - 1; i >= 0; i--)
+-        {
+-            var entry = chunkMapBuffer[i];
+-            
+-            if (!requiredChunksSet.Contains(entry.Id) && entry.State == ChunkState.Loaded)
+-            {
+-                // Помечаем чанк для выгрузки
+-                // Удаляем чанк Entity (NPC будут удалены в отдельной системе)
+-                ecb.DestroyEntity(entry.Entity);
+-                chunkMapBuffer.RemoveAt(i); // Удаляем запись из буфера
+-                // Debug.Log($"Marked chunk {entry.Id} for unloading (NPC cleanup handled by ChunkNPCCleanupSystem)"); // Убрали
+-            }
+-        }
+-
+-        // 8. Проигрываем команды
+-        ecb.Playback(entityManager);
+-        ecb.Dispose();
+-
+-        // 9. Освобождаем временные структуры
+-        existingChunks.Dispose();
+-        requiredChunksSet.Dispose();
+-        requiredChunks.Dispose();
+     }
+ 
+-    // Вспомогательная функция: получить ID чанка по 2D мировой позиции (X-Y)
+     private static int2 WorldToChunkId(float2 worldPos2D)
+     {
+         var x = (int)math.floor(worldPos2D.x / ChunkConstants.CHUNK_SIZE);
+@@ -156,9 +165,8 @@ public partial struct ChunkManagementSystem : ISystem
+         return new int2(x, y);
+     }
+ 
+-    // Вспомогательная функция: получить 2D мировую позицию угла чанка по ID (X-Y)
+     private static float2 ChunkIdToWorldPosition(int2 chunkId)
+     {
+         return new float2(chunkId.x * ChunkConstants.CHUNK_SIZE, chunkId.y * ChunkConstants.CHUNK_SIZE);
+     }
+-}
+\ No newline at end of file
++}
+diff --git a/Assets/Code/World/Generation/Systems/ChunkNPCCleanupSystem.cs b/Assets/Code/World/Generation/Systems/ChunkNPCCleanupSystem.cs
+index 92d4e44..4286fc1 100644
+--- a/Assets/Code/World/Generation/Systems/ChunkNPCCleanupSystem.cs
++++ b/Assets/Code/World/Generation/Systems/ChunkNPCCleanupSystem.cs
+@@ -19,9 +19,10 @@ public partial struct ChunkNPCCleanupSystem : ISystem
+         var mapDataEntity = singleton.ChunkMapDataEntity;
+         var chunkMapBuffer = entityManager.GetBuffer<ChunkMapEntry>(mapDataEntity);
+ 
+-        // Получаем все NPC с компонентом Location
++        // Получаем все NPC с компонентом Location, исключая префабы
+         var npcQuery = SystemAPI.QueryBuilder()
+             .WithAll<Location>()
++            .WithNone<Prefab>()
+             .Build();
+ 
+         var npcEntities = npcQuery.ToEntityArray(Allocator.Temp);

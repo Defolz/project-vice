@@ -19,9 +19,10 @@ public partial struct ChunkNPCCleanupSystem : ISystem
         var mapDataEntity = singleton.ChunkMapDataEntity;
         var chunkMapBuffer = entityManager.GetBuffer<ChunkMapEntry>(mapDataEntity);
 
-        // Получаем все NPC с компонентом Location
+        // Получаем все NPC с компонентом Location, исключая префабы
         var npcQuery = SystemAPI.QueryBuilder()
             .WithAll<Location>()
+            .WithNone<Prefab>()
             .Build();
 
         var npcEntities = npcQuery.ToEntityArray(Allocator.Temp);

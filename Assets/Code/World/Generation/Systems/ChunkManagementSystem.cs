@@ -3,43 +3,37 @@ using Unity.Collections;
 using Unity.Entities;
 using Unity.Mathematics;
 
-// Система управления загрузкой, выгрузкой и жизненным циклом чанков (теперь 2D X-Y)
-[UpdateInGroup(typeof(InitializationSystemGroup))] // Или SimulationSystemGroup, зависит от логики
+// Система управления загрузкой, выгрузкой и жизненным циклом чанков (2D X-Y)
+[UpdateInGroup(typeof(InitializationSystemGroup))]
 public partial struct ChunkManagementSystem : ISystem
 {
-    // Центральная точка мира (2D X-Y), вокруг которой загружаются чанки (временно - фиксированная)
-    // В реальности это будет позиция игрока или центр активной симуляции.
-    private static readonly float2 CENTER_POINT = new float2(0, 0);
-
     [BurstCompile]
     public void OnCreate(ref SystemState state)
     {
         var entityManager = state.EntityManager;
-        // 1. Создаём Prefab для чанков (в реальности это может быть загружено из ScriptableObject или другого источника)
+        
+        // Проверяем, не создан ли уже singleton
+        if (SystemAPI.HasSingleton<ChunkMapSingleton>())
+            return;
+        
+        // 1. Создаём Prefab для чанков
         var chunkPrefab = entityManager.CreateEntity();
         entityManager.AddComponent<Chunk>(chunkPrefab);
-        // ... добавить другие компоненты, характерные для содержимого чанка (здания, декорации и т.п.)
+        entityManager.AddComponent<Prefab>(chunkPrefab);
 
         // 2. Создаём Entity для хранения буфера ChunkMapEntry
         var mapDataEntity = entityManager.CreateEntity();
         entityManager.AddComponentData(mapDataEntity, new ChunkMapBufferData());
-        // --- ДОБАВЛЕНИЕ БУФЕРА ПРЯМО ТУТ ---
         entityManager.AddBuffer<ChunkMapEntry>(mapDataEntity);
-        // -----------------------------------
 
         // 3. Создаём синглтон ChunkMapSingleton
         var singletonEntity = entityManager.CreateEntity();
         entityManager.AddComponentData(singletonEntity, new ChunkMapSingleton(chunkPrefab, mapDataEntity));
-
-        // Логика инициализации завершена
-        // Debug.Log("ChunkManagementSystem initialized."); // Убрали
     }
 
     [BurstCompile]
     public void OnDestroy(ref SystemState state)
     {
-        // Освобождение ресурсов, если необходимо
-        // Буферы и другие NativeContainers, прикреплённые к Entity, удалятся автоматически при удалении Entity
     }
 
     [BurstCompile]
@@ -56,99 +50,114 @@ public partial struct ChunkManagementSystem : ISystem
         // 2. Получаем буфер с картой чанков
         var chunkMapBuffer = entityManager.GetBuffer<ChunkMapEntry>(mapDataEntity);
 
-        // 3. Определяем центр и границы зоны загрузки (в 2D X-Y)
-        var centerChunkId = WorldToChunkId(CENTER_POINT);
+        // 3. Определяем центр и границы зоны загрузки
+        var centerPoint = SystemAPI.HasSingleton<PlayerPosition>() 
+            ? SystemAPI.GetSingleton<PlayerPosition>().Value 
+            : float2.zero;
+        
+        var centerChunkId = WorldToChunkId(centerPoint);
         var minChunkId = centerChunkId - new int2(viewDistance, viewDistance);
         var maxChunkId = centerChunkId + new int2(viewDistance, viewDistance);
 
-        // 4. Создаём список чанков, которые должны быть загружены
-        var requiredChunks = new NativeList<int2>(Allocator.Temp);
+        // 4. Создаём HashSet требуемых чанков
+        int estimatedCount = (viewDistance * 2 + 1) * (viewDistance * 2 + 1);
+        var requiredChunksSet = new NativeHashSet<int2>(estimatedCount, Allocator.Temp);
+        
         for (int x = minChunkId.x; x <= maxChunkId.x; x++)
         {
             for (int y = minChunkId.y; y <= maxChunkId.y; y++)
             {
-                var id = new int2(x, y);
-                requiredChunks.Add(id);
+                requiredChunksSet.Add(new int2(x, y));
             }
         }
 
-        // 5. Создаём CommandBuffer для безопасного изменения ECS структуры
-        var ecb = new EntityCommandBuffer(Allocator.Temp);
-
-        // 6. Создаем HashMap для быстрого поиска (O(1) вместо O(n))
+        // 5. Создаём HashMap существующих чанков
         var existingChunks = new NativeHashMap<int2, ChunkMapEntry>(chunkMapBuffer.Length, Allocator.Temp);
         for (int i = 0; i < chunkMapBuffer.Length; i++)
         {
             existingChunks.TryAdd(chunkMapBuffer[i].Id, chunkMapBuffer[i]);
         }
 
-        // Проверяем, какие чанки нужно создать (загрузить)
-        foreach (var id in requiredChunks)
+        // 6. Список чанков для добавления в буфер ПОСЛЕ Playback
+        var chunksToAdd = new NativeList<int2>(Allocator.Temp);
+
+        var ecb = new EntityCommandBuffer(Allocator.Temp);
+        try
         {
-            if (existingChunks.TryGetValue(id, out var entry))
+            // === ЗАГРУЗКА НОВЫХ ЧАНКОВ ===
+            foreach (var chunkId in requiredChunksSet)
             {
-                // Чанк уже существует, проверяем состояние
-                if (entry.State == ChunkState.Unloaded)
+                if (existingChunks.TryGetValue(chunkId, out var entry))
                 {
-                    ecb.SetComponent(entry.Entity, new Chunk(id, ChunkIdToWorldPosition(id), ChunkState.Loaded));
-                    // Обновляем запись в буфере
-                    for (int i = 0; i < chunkMapBuffer.Length; i++)
+                    // Чанк существует - проверяем состояние
+                    if (entry.State == ChunkState.Unloaded)
                     {
-                        if (chunkMapBuffer[i].Id.Equals(id))
+                        ecb.SetComponent(entry.Entity, new Chunk(
+                            chunkId, 
+                            ChunkIdToWorldPosition(chunkId), 
+                            ChunkState.Loaded
+                        ));
+                        
+                        // Обновляем в буфере
+                        for (int i = 0; i < chunkMapBuffer.Length; i++)
                         {
-                            chunkMapBuffer[i] = new ChunkMapEntry(id, entry.Entity, ChunkState.Loaded);
-                            break;
+                            if (chunkMapBuffer[i].Id.Equals(chunkId))
+                            {
+                                chunkMapBuffer[i] = new ChunkMapEntry(chunkId, entry.Entity, ChunkState.Loaded);
+                                break;
+                            }
                         }
                     }
                 }
+                else
+                {
+                    // Чанк не существует - создаём новый НАПРЯМУЮ
+                    var newChunkEntity = entityManager.Instantiate(chunkPrefab);
+                    entityManager.SetComponentData(newChunkEntity, new Chunk(
+                        chunkId, 
+                        ChunkIdToWorldPosition(chunkId), 
+                        ChunkState.Loaded
+                    ));
+                    
+                    // Сразу добавляем в буфер (entity уже реализован)
+                    chunkMapBuffer.Add(new ChunkMapEntry(
+                        chunkId, 
+                        newChunkEntity, 
+                        ChunkState.Loaded
+                    ));
+                }
             }
-            else
-            {
-                // Чанк не существует, создаём его
-                var newChunkEntity = ecb.Instantiate(chunkPrefab);
-                ecb.SetComponent(newChunkEntity, new Chunk(id, ChunkIdToWorldPosition(id), ChunkState.Loaded));
-
-                // Добавляем запись в буфер (через ECB, если буфер будет обновляться в другой системе)
-                // Для простоты в этой системе добавляем сразу в буфер
-                chunkMapBuffer.Add(new ChunkMapEntry(id, newChunkEntity, ChunkState.Loaded));
-                
-                // Debug.Log($"Created and loaded chunk {id}"); // Убрали
-            }
-        }
-
-        // 7. Создаем HashSet для быстрой проверки нужных чанков
-        var requiredChunksSet = new NativeHashSet<int2>(requiredChunks.Length, Allocator.Temp);
-        foreach (var id in requiredChunks)
-        {
-            requiredChunksSet.Add(id);
-        }
-
-        // Проверяем, какие чанки нужно выгрузить
-        for (int i = chunkMapBuffer.Length - 1; i >= 0; i--)
-        {
-            var entry = chunkMapBuffer[i];
             
-            if (!requiredChunksSet.Contains(entry.Id) && entry.State == ChunkState.Loaded)
+            // === ВЫГРУЗКА НЕНУЖНЫХ ЧАНКОВ ===
+            for (int i = chunkMapBuffer.Length - 1; i >= 0; i--)
             {
-                // Помечаем чанк для выгрузки
-                // Удаляем чанк Entity (NPC будут удалены в отдельной системе)
-                ecb.DestroyEntity(entry.Entity);
-                chunkMapBuffer.RemoveAt(i); // Удаляем запись из буфера
-                // Debug.Log($"Marked chunk {entry.Id} for unloading (NPC cleanup handled by ChunkNPCCleanupSystem)"); // Убрали
+                var entry = chunkMapBuffer[i];
+                
+                if (!requiredChunksSet.Contains(entry.Id) && entry.State == ChunkState.Loaded)
+                {
+                    if (entityManager.Exists(entry.Entity))
+                    {
+                        ecb.DestroyEntity(entry.Entity);
+                        chunkMapBuffer.RemoveAt(i);
+                    }
+                    else
+                    {
+                        chunkMapBuffer.RemoveAt(i);
+                    }
+                }
             }
+            
+            ecb.Playback(entityManager);
         }
-
-        // 8. Проигрываем команды
-        ecb.Playback(entityManager);
-        ecb.Dispose();
-
-        // 9. Освобождаем временные структуры
-        existingChunks.Dispose();
-        requiredChunksSet.Dispose();
-        requiredChunks.Dispose();
+        finally
+        {
+            ecb.Dispose();
+            existingChunks.Dispose();
+            requiredChunksSet.Dispose();
+            chunksToAdd.Dispose();
+        }
     }
 
-    // Вспомогательная функция: получить ID чанка по 2D мировой позиции (X-Y)
     private static int2 WorldToChunkId(float2 worldPos2D)
     {
         var x = (int)math.floor(worldPos2D.x / ChunkConstants.CHUNK_SIZE);
@@ -156,7 +165,6 @@ public partial struct ChunkManagementSystem : ISystem
         return new int2(x, y);
     }
 
-    // Вспомогательная функция: получить 2D мировую позицию угла чанка по ID (X-Y)
     private static float2 ChunkIdToWorldPosition(int2 chunkId)
     {
         return new float2(chunkId.x * ChunkConstants.CHUNK_SIZE, chunkId.y * ChunkConstants.CHUNK_SIZE);

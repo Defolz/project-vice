@@ -70,7 +70,7 @@ public partial struct NavigationGridUpdateSystem : ISystem
             // Dispose старого BlobAsset
             if (grid.IsValid)
             {
-                grid.Dispose();
+                grid.GridBlob.Dispose();
             }
             
             // Создаём новый BlobAsset
@@ -179,7 +179,7 @@ public partial struct NavigationGridUpdateSystem : ISystem
             ChunkConstants.CHUNK_SIZE
         );
         
-        const float margin = 20f;
+        var margin = ChunkConstants.MAX_OBSTACLE_RADIUS;
         
         for (int i = 0; i < allObstacles.Length; i++)
         {

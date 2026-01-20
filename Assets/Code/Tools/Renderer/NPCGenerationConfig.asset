@@ -1,0 +1,23 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: afbb6a31c71b45b42891092d6817d56b, type: 3}
+  m_Name: NPCGenerationConfig
+  m_EditorClassIdentifier: ProjectVice.Core::NPCGenerationConfig
+  MinNPCPerSpawnCycle: 5
+  MaxNPCPerSpawnCycle: 10
+  AverageNPCPerChunk: 2
+  MaxNPCPerChunk: 5
+  FamiliesWeight: 0.3
+  PoliceWeight: 0.2
+  CiviliansWeight: 0.5
+  MinAggression: 0.1
+  MaxAggression: 0.9

@@ -15,8 +15,8 @@ public struct StaticObstacle : IComponentData
         Type = type;
     }
     
-    // Проверить, перекрывается ли препятствие с точкой
-    public bool ContainsPoint(float2 point)
+    // Проверить, находится ли точка внутри препятствия
+    public bool IsPointInside(float2 point)
     {
         return math.distance(Position, point) < Radius;
     }

@@ -21,12 +21,4 @@ public struct GridData
         if (x < 0 || x >= GridSize || y < 0 || y >= GridSize) return false;
         return Cells[GetCellIndex(x, y)] == 0;
     }
-    
-    // Установить состояние ячейки
-    public void SetCell(int x, int y, byte value, ref BlobBuilder builder)
-    {
-        if (x < 0 || x >= GridSize || y < 0 || y >= GridSize) return;
-        var cellsArray = builder.Allocate(ref Cells, GridSize * GridSize);
-        cellsArray[GetCellIndex(x, y)] = value;
-    }
 }

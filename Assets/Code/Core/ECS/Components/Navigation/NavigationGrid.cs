@@ -9,13 +9,4 @@ public struct NavigationGrid : IComponentData
     
     // Проверка валидности BlobAsset
     public bool IsValid => GridBlob.IsCreated;
-    
-    // Освободить ресурсы (вызывать при выгрузке чанка)
-    public void Dispose()
-    {
-        if (GridBlob.IsCreated)
-        {
-            GridBlob.Dispose();
-        }
-    }
 }

@@ -10,4 +10,5 @@ public static class ChunkConstants
     // Navigation Grid Settings
     public const int NAV_GRID_SIZE = 64; // 64x64 ячеек навигационной сетки на чанк
     public const float NAV_CELL_SIZE = CHUNK_SIZE / NAV_GRID_SIZE; // ~1.56м размер ячейки
+    public const float MAX_OBSTACLE_RADIUS = 20f; // Максимальный радиус препятствия
 }
