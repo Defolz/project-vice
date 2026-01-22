@@ -3,8 +3,7 @@ using Unity.Entities;
 using Unity.Mathematics;
 using UnityEngine;
 
-// Визуализатор путей для отладки pathfinding
-// ИСПРАВЛЕНО: улучшенная визуализация, отладочная информация
+// Визуализатор с ОГРОМНЫМИ сферами для теста
 public class PathVisualizer : MonoBehaviour
 {
     [Header("Visualization Settings")]
@@ -12,49 +11,55 @@ public class PathVisualizer : MonoBehaviour
     [SerializeField] private bool showWaypoints = true;
     [SerializeField] private bool showCurrentWaypoint = true;
     [SerializeField] private bool showEntityInfo = true;
+    [SerializeField] private bool showDebugSpheres = true;
+    [SerializeField] private bool showHugeSpheres = true; // НОВОЕ!
+    [SerializeField] private bool showFullPath = true; // Показывать весь путь или только оставшуюся часть
     
     [Header("Colors")]
     [SerializeField] private Color pathColor = new Color(0, 1, 0, 0.8f);
     [SerializeField] private Color waypointColor = new Color(1, 1, 0, 0.9f);
     [SerializeField] private Color currentWaypointColor = new Color(1, 0, 0, 1f);
-    [SerializeField] private Color startColor = new Color(0, 0, 1, 1f); // Синий
+    [SerializeField] private Color startColor = new Color(0, 0, 1, 1f);
+    [SerializeField] private Color debugColor = new Color(1, 0, 1, 1f);
     
     [Header("Sizes")]
     [SerializeField] private float waypointRadius = 0.5f;
     [SerializeField] private float currentWaypointRadius = 0.8f;
+    [SerializeField] private float hugeSphereRadius = 5f; // НОВОЕ!
     
     [Header("Performance")]
-    [SerializeField] private float maxDrawDistance = 200f;
+    [SerializeField] private float maxDrawDistance = 500f; // Увеличено!
     [SerializeField] private int maxPathsToDraw = 100;
     
     [Header("Debug")]
-    [SerializeField] private bool verboseLogging = false;
+    [SerializeField] private bool verboseLogging = true;
+    [SerializeField] private bool logWaypointCoordinates = true;
     
     private World world;
     private EntityManager entityManager;
     private float lastDebugTime = 0f;
-    private const float DEBUG_INTERVAL = 2f;
+    private const float DEBUG_INTERVAL = 3f;
     
+    // === ФИКСИРОВАННАЯ ГЛУБИНА ДЛЯ 2D ===
+    private const float DRAW_DEPTH = -0.5f;
+
     void Start()
     {
         world = World.DefaultGameObjectInjectionWorld;
         if (world != null)
         {
             entityManager = world.EntityManager;
-            Debug.Log("<color=cyan>PathVisualizer initialized!</color>");
+            Debug.Log("<color=cyan>🎨 PathVisualizer (2D FIXED) initialized!</color>");
         }
         else
         {
-            Debug.LogError("<color=red>PathVisualizer: World not found!</color>");
+            Debug.LogError("<color=red>❌ PathVisualizer: World not found!</color>");
         }
     }
     
     void OnDrawGizmos()
     {
         if (!Application.isPlaying || world == null || !world.IsCreated)
-            return;
-        
-        if (!showPaths && !showWaypoints)
             return;
         
         DrawPaths();
@@ -65,9 +70,6 @@ public class PathVisualizer : MonoBehaviour
         if (!Application.isPlaying || world == null || !world.IsCreated)
             return;
         
-        if (!showPaths)
-            return;
-        
         DrawPathsRuntime();
     }
     
@@ -76,12 +78,8 @@ public class PathVisualizer : MonoBehaviour
         if (entityManager == null)
             return;
         
-        var cameraPos = Camera.current != null ? Camera.current.transform.position : Camera.main != null ? Camera.main.transform.position : Vector3.zero;
-        var cameraPos2D = new float2(cameraPos.x, cameraPos.z);
-        
         int pathsDrawn = 0;
         
-        // Query для entity с PathFollower
         var query = entityManager.CreateEntityQuery(
             ComponentType.ReadOnly<PathFollower>(),
             ComponentType.ReadOnly<Location>(),
@@ -94,14 +92,14 @@ public class PathVisualizer : MonoBehaviour
         if (shouldLog)
         {
             lastDebugTime = Time.time;
-            Debug.Log($"<color=cyan>📍 PathVisualizer: {entityCount} entities with paths</color>");
+            Debug.Log($"<color=cyan>📍 PathVisualizer: Found {entityCount} entities with paths</color>");
         }
         
         if (entityCount == 0)
         {
-            if (shouldLog && verboseLogging)
+            if (shouldLog)
             {
-                Debug.LogWarning("<color=yellow>⚠️ No entities with PathFollower + Location + PathWaypoint found!</color>");
+                Debug.LogWarning("<color=red>⚠️ No entities to draw!</color>");
             }
             query.Dispose();
             return;
@@ -118,14 +116,6 @@ public class PathVisualizer : MonoBehaviour
             var follower = entityManager.GetComponentData<PathFollower>(entity);
             var waypointBuffer = entityManager.GetBuffer<PathWaypoint>(entity);
             
-            // Distance culling
-            if (maxDrawDistance > 0)
-            {
-                var distance = math.distance(cameraPos2D, location.GlobalPosition2D);
-                if (distance > maxDrawDistance)
-                    continue;
-            }
-            
             if (waypointBuffer.Length == 0)
             {
                 if (shouldLog && verboseLogging)
@@ -135,76 +125,127 @@ public class PathVisualizer : MonoBehaviour
             
             pathsDrawn++;
             
-            // ИСПРАВЛЕНО: Рисуем стартовую позицию NPC
             var npcPos = location.GlobalPosition2D;
-            var npcPos3D = new Vector3(npcPos.x, 0.5f, npcPos.y); // ВАЖНО: Y=0.5 для видимости
+            // === ПРАВИЛЬНАЯ 2D КОНВЕРТАЦИЯ ===
+            var npcPos3D = new Vector3(npcPos.x, npcPos.y, DRAW_DEPTH);
             
+            if (shouldLog)
+            {
+                Debug.Log($"<color=lime>Drawing Entity {entity.Index} at ({npcPos.x:G}, {npcPos.y:G}), {waypointBuffer.Length} waypoints</color>");
+            }
+            
+            // === ОГРОМНАЯ СИНЯЯ СФЕРА НА NPC (ТОЧНО БУДЕТ ВИДНО!) ===
+            if (showHugeSpheres)
+            {
+                Gizmos.color = Color.cyan;
+                Gizmos.DrawWireSphere(npcPos3D, hugeSphereRadius);
+                Gizmos.DrawSphere(npcPos3D, hugeSphereRadius * 0.5f);
+            }
+            
+            // Обычная синяя сфера
             Gizmos.color = startColor;
-            Gizmos.DrawWireSphere(npcPos3D, 0.7f);
-            Gizmos.DrawSphere(npcPos3D, 0.3f);
+            Gizmos.DrawWireSphere(npcPos3D, 1f);
+            Gizmos.DrawSphere(npcPos3D, 0.5f);
             
-            // Рисуем линию от NPC к первому waypoint
+            // === ОГРОМНАЯ КРАСНАЯ СФЕРА НА ПЕРВОМ WAYPOINT ===
             if (follower.CurrentWaypointIndex < waypointBuffer.Length)
             {
                 var firstWaypoint = waypointBuffer[follower.CurrentWaypointIndex];
-                var firstPos3D = new Vector3(firstWaypoint.Position.x, 0.5f, firstWaypoint.Position.y);
+                // === ПРАВИЛЬНАЯ 2D КОНВЕРТАЦИЯ ===
+                var firstPos3D = new Vector3(firstWaypoint.Position.x, firstWaypoint.Position.y, DRAW_DEPTH);
                 
+                if (showHugeSpheres)
+                {
+                    Gizmos.color = Color.red;
+                    Gizmos.DrawWireSphere(firstPos3D, hugeSphereRadius);
+                    Gizmos.DrawSphere(firstPos3D, hugeSphereRadius * 0.5f);
+                }
+                
+                // Толстая линия от NPC к waypoint
                 Gizmos.color = currentWaypointColor;
                 Gizmos.DrawLine(npcPos3D, firstPos3D);
+                
+                // Дополнительные параллельные линии для толщины
+                var offset = Vector3.right * 0.5f;
+                Gizmos.DrawLine(npcPos3D + offset, firstPos3D + offset);
+                Gizmos.DrawLine(npcPos3D - offset, firstPos3D - offset);
             }
             
-            // Рисуем путь
+            // === ПУТЬ (ЗЕЛЁНЫЕ ЛИНИИ) ===
             if (showPaths)
             {
-                for (int i = follower.CurrentWaypointIndex; i < waypointBuffer.Length - 1; i++)
+                // Определяем с какого индекса начинать рисовать путь
+                int startIndex = showFullPath ? 0 : follower.CurrentWaypointIndex;
+                
+                // Рисуем путь от начального waypoint до конца
+                for (int i = startIndex; i < waypointBuffer.Length - 1; i++)
                 {
                     var waypoint = waypointBuffer[i];
                     var nextWaypoint = waypointBuffer[i + 1];
                     
-                    var pos1 = new Vector3(waypoint.Position.x, 0.5f, waypoint.Position.y);
-                    var pos2 = new Vector3(nextWaypoint.Position.x, 0.5f, nextWaypoint.Position.y);
+                    // === ПРАВИЛЬНАЯ 2D КОНВЕРТАЦИЯ ===
+                    var pos1 = new Vector3(waypoint.Position.x, waypoint.Position.y, DRAW_DEPTH);
+                    var pos2 = new Vector3(nextWaypoint.Position.x, nextWaypoint.Position.y, DRAW_DEPTH);
                     
-                    Gizmos.color = pathColor;
+                    // Используем разные цвета для пройденной и оставшейся части пути
+                    if (showFullPath && i < follower.CurrentWaypointIndex)
+                    {
+                        Gizmos.color = new Color(0f, 0.5f, 0f, 0.5f); // Темно-зеленый для пройденного
+                    }
+                    else
+                    {
+                        Gizmos.color = pathColor; // Обычный цвет для оставшегося пути
+                    }
+                    
                     Gizmos.DrawLine(pos1, pos2);
+                    
+                    // Толстые линии - используем смещения по обеим осям для лучшей видимости
+                    var offsetX = Vector3.right * 0.3f;
+                    Gizmos.DrawLine(pos1 + offsetX, pos2 + offsetX);
+                    Gizmos.DrawLine(pos1 - offsetX, pos2 - offsetX);
                 }
             }
             
-            // Рисуем waypoints
+            // === WAYPOINTS (ЖЁЛТЫЕ СФЕРЫ) ===
             if (showWaypoints)
             {
                 for (int i = follower.CurrentWaypointIndex; i < waypointBuffer.Length; i++)
                 {
                     var waypoint = waypointBuffer[i];
-                    var waypointPos3D = new Vector3(waypoint.Position.x, 0.5f, waypoint.Position.y);
+                    // === ПРАВИЛЬНАЯ 2D КОНВЕРТАЦИЯ ===
+                    var waypointPos3D = new Vector3(waypoint.Position.x, waypoint.Position.y, DRAW_DEPTH);
                     
                     if (i == follower.CurrentWaypointIndex && showCurrentWaypoint)
                     {
-                        // Текущий waypoint
                         Gizmos.color = currentWaypointColor;
-                        Gizmos.DrawWireSphere(waypointPos3D, currentWaypointRadius);
-                        Gizmos.DrawSphere(waypointPos3D, currentWaypointRadius * 0.6f);
+                        Gizmos.DrawWireSphere(waypointPos3D, currentWaypointRadius * 2);
+                        Gizmos.DrawSphere(waypointPos3D, currentWaypointRadius);
                     }
                     else
                     {
-                        // Обычные waypoints
                         Gizmos.color = waypointColor;
-                        Gizmos.DrawWireSphere(waypointPos3D, waypointRadius);
-                        Gizmos.DrawSphere(waypointPos3D, waypointRadius * 0.4f);
+                        Gizmos.DrawWireSphere(waypointPos3D, waypointRadius * 2);
+                        Gizmos.DrawSphere(waypointPos3D, waypointRadius);
                     }
                 }
             }
             
-            // Entity info
-            if (showEntityInfo && follower.CurrentWaypointIndex < waypointBuffer.Length)
+            // === ТЕКСТ ===
+            if (showEntityInfo)
             {
-                var infoPos = npcPos3D + Vector3.up * 2f;
+                var infoPos = npcPos3D + Vector3.up * 3f;
                 
 #if UNITY_EDITOR
                 var style = new GUIStyle();
                 style.normal.textColor = Color.white;
-                style.fontSize = 12;
+                style.fontSize = 14;
+                style.fontStyle = FontStyle.Bold;
                 
-                var info = $"E:{entity.Index}\n{follower.CurrentWaypointIndex}/{waypointBuffer.Length}\n{follower.State}";
+                var info = $"E:{entity.Index}\n" +
+                          $"WP: {follower.CurrentWaypointIndex}/{waypointBuffer.Length}\n" +
+                          $"{follower.State}\n" +
+                          $"Pos: ({npcPos.x:G}, {npcPos.y:G})";
+                
                 UnityEditor.Handles.Label(infoPos, info, style);
 #endif
             }
@@ -219,7 +260,6 @@ public class PathVisualizer : MonoBehaviour
         query.Dispose();
     }
     
-    // Рисование в Runtime (Game View)
     void DrawPathsRuntime()
     {
         if (entityManager == null)
@@ -243,27 +283,39 @@ public class PathVisualizer : MonoBehaviour
                 continue;
             
             var npcPos = location.GlobalPosition2D;
-            var npcPos3D = new Vector3(npcPos.x, 0.5f, npcPos.y);
+            // === ПРАВИЛЬНАЯ 2D КОНВЕРТАЦИЯ ===
+            var npcPos3D = new Vector3(npcPos.x, npcPos.y, DRAW_DEPTH);
             
-            // Линия от NPC к первому waypoint
             if (follower.CurrentWaypointIndex < waypointBuffer.Length)
             {
                 var firstWaypoint = waypointBuffer[follower.CurrentWaypointIndex];
-                var firstPos3D = new Vector3(firstWaypoint.Position.x, 0.5f, firstWaypoint.Position.y);
+                // === ПРАВИЛЬНАЯ 2D КОНВЕРТАЦИЯ ===
+                var firstPos3D = new Vector3(firstWaypoint.Position.x, firstWaypoint.Position.y, DRAW_DEPTH);
                 
-                Debug.DrawLine(npcPos3D, firstPos3D, currentWaypointColor);
+                Debug.DrawLine(npcPos3D, firstPos3D, currentWaypointColor, 0.1f);
             }
             
-            // Путь
-            for (int i = follower.CurrentWaypointIndex; i < waypointBuffer.Length - 1; i++)
+            // Определяем с какого индекса начинать рисовать путь
+            int startIndex = showFullPath ? 0 : follower.CurrentWaypointIndex;
+            
+            for (int i = startIndex; i < waypointBuffer.Length - 1; i++)
             {
                 var waypoint = waypointBuffer[i];
                 var nextWaypoint = waypointBuffer[i + 1];
                 
-                var pos1 = new Vector3(waypoint.Position.x, 0.5f, waypoint.Position.y);
-                var pos2 = new Vector3(nextWaypoint.Position.x, 0.5f, nextWaypoint.Position.y);
+                // === ПРАВИЛЬНАЯ 2D КОНВЕРТАЦИЯ ===
+                var pos1 = new Vector3(waypoint.Position.x, waypoint.Position.y, DRAW_DEPTH);
+                var pos2 = new Vector3(nextWaypoint.Position.x, nextWaypoint.Position.y, DRAW_DEPTH);
                 
-                Debug.DrawLine(pos1, pos2, pathColor);
+                // Используем разные цвета для пройденной и оставшейся части пути
+                if (showFullPath && i < follower.CurrentWaypointIndex)
+                {
+                    Debug.DrawLine(pos1, pos2, new Color(0f, 0.5f, 0f, 0.5f), 0.1f); // Темно-зеленый для пройденного
+                }
+                else
+                {
+                    Debug.DrawLine(pos1, pos2, pathColor, 0.1f); // Обычный цвет для оставшегося пути
+                }
             }
         }
         

@@ -267,6 +267,8 @@ GameObject:
   - component: {fileID: 1774410212}
   - component: {fileID: 1774410213}
   - component: {fileID: 1774410214}
+  - component: {fileID: 1774410216}
+  - component: {fileID: 1774410217}
   m_Layer: 0
   m_Name: ViceDebug
   m_TagString: Untagged
@@ -338,6 +340,38 @@ MonoBehaviour:
   NPCPointSize: 0.3
   LabelFontSize: 12
   UpdateInterval: 0.5
+--- !u!114 &1774410216
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1774410210}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: cda2170c1aed8d4498980e9b32e75e04, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: ProjectVice.Tools::NPCPathAssigner
+  selectionRadius: 5
+  massSelectionRadius: 5
+  groundPlaneHeight: 0
+  showSelectionGizmo: 1
+  selectedColor: {r: 0, g: 1, b: 0, a: 0.8}
+  massSelectedColor: {r: 1, g: 1, b: 0, a: 0.8}
+  targetColor: {r: 1, g: 0, b: 0, a: 0.8}
+  verboseLogging: 0
+--- !u!114 &1774410217
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1774410210}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 4f198c20ce4600441b71f35e81c3e67c, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: ProjectVice.Tools::SimplePathVisualizer
 --- !u!1660057539 &9223372036854775807
 SceneRoots:
   m_ObjectHideFlags: 0

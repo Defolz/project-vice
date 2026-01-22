@@ -1,0 +1,28 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 8a7f3c9d2e1b4f5a9c3d6e2f8b1a4c7d, type: 3}
+  m_Name: ChunkGenerationConfig
+  m_EditorClassIdentifier: ProjectVice.Core::ChunkGenerationConfig
+  MinBuildingsPerChunk: 2
+  MaxBuildingsPerChunk: 8
+  MinBuildingSize: 8
+  MaxBuildingSize: 25
+  MinBuildingHeight: 4
+  MaxBuildingHeight: 30
+  ResidentialWeight: 0.4
+  CommercialWeight: 0.3
+  IndustrialWeight: 0.15
+  PublicWeight: 0.1
+  SpecialWeight: 0.05
+  MinBuildingSpacing: 5
+  EdgeMargin: 5
+  MaxOccupancy: 10

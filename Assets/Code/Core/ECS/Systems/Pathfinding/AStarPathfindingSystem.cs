@@ -12,9 +12,9 @@ using Unity.Mathematics;
 public partial struct AStarPathfindingSystem : ISystem
 {
     private const float PATH_REQUEST_TIMEOUT = 5f;
-    private const int MAX_ITERATIONS = 4096; // Увеличено для межчанковых путей
-    private const bool USE_8_DIRECTIONS = true; // 8-направленная навигация
-    private const bool USE_PATH_SMOOTHING = true; // Path smoothing
+    private const int MAX_ITERATIONS = 4096;
+    private const bool USE_8_DIRECTIONS = true;
+    private const bool USE_PATH_SMOOTHING = true;
     
     [BurstCompile]
     public void OnCreate(ref SystemState state)
@@ -28,7 +28,6 @@ public partial struct AStarPathfindingSystem : ISystem
         var entityManager = state.EntityManager;
         var ecb = new EntityCommandBuffer(Allocator.TempJob);
         
-        // Получаем все NavigationGrid
         var gridQuery = SystemAPI.QueryBuilder()
             .WithAll<NavigationGrid, Chunk>()
             .Build();
@@ -36,10 +35,8 @@ public partial struct AStarPathfindingSystem : ISystem
         var grids = gridQuery.ToComponentDataArray<NavigationGrid>(Allocator.TempJob);
         var chunks = gridQuery.ToComponentDataArray<Chunk>(Allocator.TempJob);
         
-        // Обрабатываем каждый PathRequest
         foreach (var (pathRequest, entity) in SystemAPI.Query<RefRW<PathRequest>>().WithEntityAccess())
         {
-            // Timeout
             if (currentTime - pathRequest.ValueRO.RequestTime > PATH_REQUEST_TIMEOUT)
             {
                 pathRequest.ValueRW.Status = PathStatus.Timeout;
@@ -48,7 +45,6 @@ public partial struct AStarPathfindingSystem : ISystem
                 continue;
             }
             
-            // Обрабатываем только Pending
             if (pathRequest.ValueRO.Status != PathStatus.Pending)
                 continue;
             
@@ -56,7 +52,6 @@ public partial struct AStarPathfindingSystem : ISystem
             
             var startTime = (float)SystemAPI.Time.ElapsedTime;
             
-            // Запускаем A*
             var pathResult = FindPath(
                 pathRequest.ValueRO.StartPosition,
                 pathRequest.ValueRO.TargetPosition,
@@ -86,7 +81,9 @@ public partial struct AStarPathfindingSystem : ISystem
                     waypointBuffer.Add(waypoints[i]);
                 }
                 
-                UnityEngine.Debug.Log($"<color=green>✅ Path FOUND! {waypoints.Length} waypoints, {calculationTime * 1000:F1}ms</color>");
+                // ИСПРАВЛЕНО: Убран формат :F1 (не поддерживается Burst)
+                var calcTimeMs = (int)(calculationTime * 1000);
+                UnityEngine.Debug.Log($"<color=green>✅ Path FOUND! {waypoints.Length} waypoints, {calcTimeMs}ms</color>");
                 waypoints.Dispose();
             }
             else
@@ -108,7 +105,6 @@ public partial struct AStarPathfindingSystem : ISystem
         chunks.Dispose();
     }
     
-    // A* с межчанковой навигацией и Priority Queue
     private static PathStatus FindPath(
         float2 start,
         float2 target,
@@ -120,7 +116,6 @@ public partial struct AStarPathfindingSystem : ISystem
     {
         waypoints = new NativeList<PathWaypoint>(allocator);
         
-        // Конвертируем в grid координаты (МЕЖЧАНКОВЫЕ!)
         if (!WorldToGrid(start, grids, chunks, out var startChunk, out var startCell))
         {
             UnityEngine.Debug.LogError($"Start position {start} is not in any walkable chunk!");
@@ -133,20 +128,17 @@ public partial struct AStarPathfindingSystem : ISystem
             return PathStatus.Failed;
         }
         
-        // Если старт == цель
         if (startChunk.Equals(targetChunk) && startCell.Equals(targetCell))
         {
             waypoints.Add(new PathWaypoint(target, 0f));
             return PathStatus.Success;
         }
         
-        // A* структуры
-        var openSet = new NativeMinHeap<PathNodeWithPriority>(256, allocator); // ИСПРАВЛЕНО: Priority Queue!
+        var openSet = new NativeMinHeap<PathNodeWithPriority>(256, allocator);
         var closedSet = new NativeHashSet<GridCoord>(512, allocator);
         var cameFrom = new NativeHashMap<GridCoord, GridCoord>(512, allocator);
         var gScore = new NativeHashMap<GridCoord, float>(512, allocator);
         
-        // Инициализация
         var startCoord = new GridCoord(startChunk, startCell);
         var targetCoord = new GridCoord(targetChunk, targetCell);
         
@@ -161,12 +153,10 @@ public partial struct AStarPathfindingSystem : ISystem
         bool pathFound = false;
         GridCoord finalCoord = default;
         
-        // Основной цикл A*
         while (openSet.Count > 0 && iterations < MAX_ITERATIONS)
         {
             iterations++;
             
-            // ИСПРАВЛЕНО: O(log n) вместо O(n)
             var current = openSet.Pop().Coord;
             
             if (current.Equals(targetCoord))
@@ -181,7 +171,6 @@ public partial struct AStarPathfindingSystem : ISystem
             
             closedSet.Add(current);
             
-            // Получаем соседей (4 или 8 направлений)
             var neighborCount = USE_8_DIRECTIONS ? 8 : 4;
             
             for (int i = 0; i < neighborCount; i++)
@@ -192,7 +181,6 @@ public partial struct AStarPathfindingSystem : ISystem
                 if (closedSet.Contains(neighbor))
                     continue;
                 
-                // ИСПРАВЛЕНО: Проверяем walkable с учётом чанков
                 if (!IsCellWalkable(neighbor.ChunkId, neighbor.CellPos, grids, chunks))
                     continue;
                 
@@ -211,9 +199,8 @@ public partial struct AStarPathfindingSystem : ISystem
             }
         }
         
-        // Восстанавливаем путь
         PathStatus result;
-        bool shouldReturnEarly = false; // Флаг для раннего выхода из-за maxPathLength
+        
         if (pathFound)
         {
             var path = new NativeList<GridCoord>(allocator);
@@ -231,48 +218,44 @@ public partial struct AStarPathfindingSystem : ISystem
                 if (path.Length > maxPathLength)
                 {
                     path.Dispose();
-                    // Устанавливаем флаг, чтобы выйти из блока и вернуть Failed
-                    shouldReturnEarly = true;
-                    break; // Вместо return
+                    result = PathStatus.Failed;
+                    
+                    // Очистка ресурсов
+                    openSet.Dispose();
+                    closedSet.Dispose();
+                    cameFrom.Dispose();
+                    gScore.Dispose();
+                    
+                    return result;
                 }
             }
             
-            if (!shouldReturnEarly)
+            path.Add(startCoord);
+            
+            if (USE_PATH_SMOOTHING)
             {
-                path.Add(startCoord);
-                
-                // ИСПРАВЛЕНО: Path smoothing
-                if (USE_PATH_SMOOTHING)
+                SmoothPath(ref path, grids, chunks);
+            }
+            
+            float totalDistance = 0f;
+            
+            for (int i = path.Length - 1; i >= 0; i--)
+            {
+                if (GridToWorld(path[i].ChunkId, path[i].CellPos, chunks, out var worldPos))
                 {
-                    SmoothPath(ref path, grids, chunks);
-                }
-                
-                // Конвертируем в world waypoints
-                float totalDistance = 0f;
-                
-                for (int i = path.Length - 1; i >= 0; i--)
-                {
-                    if (GridToWorld(path[i].ChunkId, path[i].CellPos, chunks, out var worldPos))
+                    waypoints.Add(new PathWaypoint(worldPos, totalDistance));
+                    
+                    if (i > 0 && GridToWorld(path[i - 1].ChunkId, path[i - 1].CellPos, chunks, out var nextWorldPos))
                     {
-                        waypoints.Add(new PathWaypoint(worldPos, totalDistance));
-                        
-                        if (i > 0 && GridToWorld(path[i - 1].ChunkId, path[i - 1].CellPos, chunks, out var nextWorldPos))
-                        {
-                            totalDistance += math.distance(worldPos, nextWorldPos);
-                        }
+                        totalDistance += math.distance(worldPos, nextWorldPos);
                     }
                 }
-                
-                path.Dispose();
-                result = PathStatus.Success;
-                
-                UnityEngine.Debug.Log($"Path found in {iterations} iterations");
             }
-            else
-            {
-                // Если был ранний выход, path.Dispose() уже выполнен
-                result = PathStatus.Failed;
-            }
+            
+            path.Dispose();
+            result = PathStatus.Success;
+            
+            UnityEngine.Debug.Log($"Path found in {iterations} iterations");
         }
         else
         {
@@ -280,7 +263,6 @@ public partial struct AStarPathfindingSystem : ISystem
             UnityEngine.Debug.LogWarning($"Path search failed after {iterations} iterations");
         }
         
-        // Единая точка очистки и возврата
         openSet.Dispose();
         closedSet.Dispose();
         cameFrom.Dispose();
@@ -289,7 +271,6 @@ public partial struct AStarPathfindingSystem : ISystem
         return result;
     }
     
-    // НОВОЕ: Получить соседа с учётом направления
     private static bool GetNeighbor(GridCoord current, int direction, out GridCoord neighbor, out float moveCost)
     {
         neighbor = default;
@@ -300,14 +281,14 @@ public partial struct AStarPathfindingSystem : ISystem
         
         switch (direction)
         {
-            case 0: offset = new int2(0, 1); break;   // Север
-            case 1: offset = new int2(1, 0); break;   // Восток
-            case 2: offset = new int2(0, -1); break;  // Юг
-            case 3: offset = new int2(-1, 0); break;  // Запад
-            case 4: offset = new int2(1, 1); isDiagonal = true; break;   // Северо-Восток
-            case 5: offset = new int2(1, -1); isDiagonal = true; break;  // Юго-Восток
-            case 6: offset = new int2(-1, -1); isDiagonal = true; break; // Юго-Запад
-            case 7: offset = new int2(-1, 1); isDiagonal = true; break;  // Северо-Запад
+            case 0: offset = new int2(0, 1); break;
+            case 1: offset = new int2(1, 0); break;
+            case 2: offset = new int2(0, -1); break;
+            case 3: offset = new int2(-1, 0); break;
+            case 4: offset = new int2(1, 1); isDiagonal = true; break;
+            case 5: offset = new int2(1, -1); isDiagonal = true; break;
+            case 6: offset = new int2(-1, -1); isDiagonal = true; break;
+            case 7: offset = new int2(-1, 1); isDiagonal = true; break;
             default: return false;
         }
         
@@ -316,7 +297,6 @@ public partial struct AStarPathfindingSystem : ISystem
         var newCellPos = current.CellPos + offset;
         var newChunkId = current.ChunkId;
         
-        // Обработка перехода через границу чанка
         while (newCellPos.x < 0)
         {
             newChunkId.x--;
@@ -342,7 +322,6 @@ public partial struct AStarPathfindingSystem : ISystem
         return true;
     }
     
-    // НОВОЕ: Path smoothing (удаление коллинеарных точек)
     private static void SmoothPath(ref NativeList<GridCoord> path, NativeArray<NavigationGrid> grids, NativeArray<Chunk> chunks)
     {
         if (path.Length <= 2)
@@ -357,7 +336,6 @@ public partial struct AStarPathfindingSystem : ISystem
         {
             int farthest = current + 1;
             
-            // Ищем самую дальнюю видимую точку
             for (int i = current + 2; i < path.Length; i++)
             {
                 if (HasLineOfSight(path[current], path[i], grids, chunks))
@@ -387,14 +365,11 @@ public partial struct AStarPathfindingSystem : ISystem
         smoothed.Dispose();
     }
     
-    // НОВОЕ: Проверка прямой видимости (для smoothing)
     private static bool HasLineOfSight(GridCoord from, GridCoord to, NativeArray<NavigationGrid> grids, NativeArray<Chunk> chunks)
     {
-        // Bresenham line algorithm
         var delta = to.CellPos - from.CellPos;
         var chunkDelta = to.ChunkId - from.ChunkId;
         
-        // Если в разных чанках, упрощённая проверка
         if (!chunkDelta.Equals(int2.zero))
             return false;
         
@@ -415,14 +390,11 @@ public partial struct AStarPathfindingSystem : ISystem
         return true;
     }
     
-    // ИСПРАВЛЕНО: Эвристика с учётом чанков
     private static float Heuristic(int2 chunkA, int2 cellA, int2 chunkB, int2 cellB)
     {
-        // Конвертируем в глобальные координаты ячеек
         var globalA = chunkA * ChunkConstants.NAV_GRID_SIZE + cellA;
         var globalB = chunkB * ChunkConstants.NAV_GRID_SIZE + cellB;
         
-        // Euclidean distance для диагоналей
         if (USE_8_DIRECTIONS)
         {
             var dx = math.abs(globalA.x - globalB.x);
@@ -430,11 +402,9 @@ public partial struct AStarPathfindingSystem : ISystem
             return math.sqrt(dx * dx + dy * dy);
         }
         
-        // Manhattan distance для 4-направленной навигации
         return math.abs(globalA.x - globalB.x) + math.abs(globalA.y - globalB.y);
     }
     
-    // ИСПРАВЛЕНО: WorldToGrid с поддержкой любых чанков
     private static bool WorldToGrid(
         float2 worldPos,
         NativeArray<NavigationGrid> grids,
@@ -457,14 +427,11 @@ public partial struct AStarPathfindingSystem : ISystem
             (int)math.clamp(localPos.y / ChunkConstants.NAV_CELL_SIZE, 0, ChunkConstants.NAV_GRID_SIZE - 1)
         );
         
-        // Проверяем, что ячейка walkable
         return IsCellWalkable(chunkId, cellPos, grids, chunks);
     }
     
-    // ИСПРАВЛЕНО: GridToWorld с валидацией чанка
     private static bool GridToWorld(int2 chunkId, int2 cellPos, NativeArray<Chunk> chunks, out float2 worldPos)
     {
-        // Проверяем существование чанка
         bool chunkExists = false;
         for (int i = 0; i < chunks.Length; i++)
         {
@@ -520,7 +487,6 @@ public partial struct AStarPathfindingSystem : ISystem
     }
 }
 
-// НОВОЕ: Координаты в grid с учётом чанка
 struct GridCoord : IEquatable<GridCoord>
 {
     public int2 ChunkId;
@@ -543,11 +509,10 @@ struct GridCoord : IEquatable<GridCoord>
     }
 }
 
-// НОВОЕ: Node для Priority Queue
 struct PathNodeWithPriority : IComparable<PathNodeWithPriority>
 {
     public GridCoord Coord;
-    public float Priority; // F score
+    public float Priority;
     
     public PathNodeWithPriority(GridCoord coord, float priority)
     {
@@ -561,7 +526,6 @@ struct PathNodeWithPriority : IComparable<PathNodeWithPriority>
     }
 }
 
-// НОВОЕ: Min Heap для Priority Queue
 public struct NativeMinHeap<T> : IDisposable where T : unmanaged, IComparable<T>
 {
     private NativeList<T> data;

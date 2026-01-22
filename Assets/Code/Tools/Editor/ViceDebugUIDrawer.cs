@@ -23,6 +23,214 @@ public class ViceDebugUIDrawer
         DrawBox($"NPCs: {data.TotalNPCs}");
     }
     
+    public void DrawTimeControl()
+    {
+        EditorGUILayout.Space(10);
+        
+        var world = World.DefaultGameObjectInjectionWorld;
+        if (world == null || !world.IsCreated)
+        {
+            EditorGUILayout.HelpBox("World not available. Enter Play Mode to control time.", MessageType.Warning);
+            return;
+        }
+        
+        var em = world.EntityManager;
+        
+        // Получаем GameTimeComponent
+        var query = em.CreateEntityQuery(typeof(GameTimeComponent));
+        if (query.CalculateEntityCount() == 0)
+        {
+            EditorGUILayout.HelpBox("GameTimeComponent not found. Make sure the game has started.", MessageType.Warning);
+            query.Dispose();
+            return;
+        }
+        
+        var gameTimeEntity = query.GetSingletonEntity();
+        var gameTime = em.GetComponentData<GameTimeComponent>(gameTimeEntity);
+        
+        // === Текущее время ===
+        EditorGUILayout.LabelField("Current Game Time", EditorStyles.boldLabel);
+        DrawBox($"Day {gameTime.Day}, {gameTime.Hour:D2}:{gameTime.Minute:D2}", new Color(0.3f, 0.6f, 1f));
+        DrawBox($"Total Seconds: {gameTime.TotalSeconds:F1}");
+        DrawBox($"Time Scale: {gameTime.TimeScale:F2}x");
+        
+        EditorGUILayout.Space(10);
+        DrawSeparator();
+        EditorGUILayout.Space(10);
+        
+        // === Контроль времени ===
+        EditorGUILayout.LabelField("Time Control", EditorStyles.boldLabel);
+        
+        // Time Scale
+        EditorGUILayout.BeginHorizontal();
+        EditorGUILayout.LabelField("Time Scale:", GUILayout.Width(100));
+        
+        if (GUILayout.Button("0.5x", GUILayout.Width(60)))
+            SetTimeScale(em, gameTimeEntity, 0.5f);
+        if (GUILayout.Button("1x", GUILayout.Width(60)))
+            SetTimeScale(em, gameTimeEntity, 1f);
+        if (GUILayout.Button("2x", GUILayout.Width(60)))
+            SetTimeScale(em, gameTimeEntity, 2f);
+        if (GUILayout.Button("5x", GUILayout.Width(60)))
+            SetTimeScale(em, gameTimeEntity, 5f);
+        if (GUILayout.Button("10x", GUILayout.Width(60)))
+            SetTimeScale(em, gameTimeEntity, 10f);
+        if (GUILayout.Button("50x", GUILayout.Width(60)))
+            SetTimeScale(em, gameTimeEntity, 50f);
+        
+        EditorGUILayout.EndHorizontal();
+        
+        EditorGUILayout.Space(5);
+        
+        // Custom Time Scale Slider
+        EditorGUILayout.BeginHorizontal();
+        EditorGUILayout.LabelField("Custom:", GUILayout.Width(100));
+        var newScale = EditorGUILayout.Slider(gameTime.TimeScale, 0.1f, 100f);
+        if (!Mathf.Approximately(newScale, gameTime.TimeScale))
+        {
+            SetTimeScale(em, gameTimeEntity, newScale);
+        }
+        EditorGUILayout.EndHorizontal();
+        
+        EditorGUILayout.Space(10);
+        DrawSeparator();
+        EditorGUILayout.Space(10);
+        
+        // === Быстрые переходы ===
+        EditorGUILayout.LabelField("Quick Time Set", EditorStyles.boldLabel);
+        
+        EditorGUILayout.BeginHorizontal();
+        if (GUILayout.Button("☀️ Morning (6:00)", GUILayout.Height(30)))
+            SetGameTime(em, gameTimeEntity, gameTime.Day, 6, 0);
+        if (GUILayout.Button("🌇 Work (8:00)", GUILayout.Height(30)))
+            SetGameTime(em, gameTimeEntity, gameTime.Day, 8, 0);
+        if (GUILayout.Button("🍔 Lunch (12:00)", GUILayout.Height(30)))
+            SetGameTime(em, gameTimeEntity, gameTime.Day, 12, 0);
+        EditorGUILayout.EndHorizontal();
+        
+        EditorGUILayout.BeginHorizontal();
+        if (GUILayout.Button("🌆 Evening (18:00)", GUILayout.Height(30)))
+            SetGameTime(em, gameTimeEntity, gameTime.Day, 18, 0);
+        if (GUILayout.Button("🌃 Night (22:00)", GUILayout.Height(30)))
+            SetGameTime(em, gameTimeEntity, gameTime.Day, 22, 0);
+        if (GUILayout.Button("🌙 Midnight (00:00)", GUILayout.Height(30)))
+            SetGameTime(em, gameTimeEntity, gameTime.Day, 0, 0);
+        EditorGUILayout.EndHorizontal();
+        
+        EditorGUILayout.Space(10);
+        DrawSeparator();
+        EditorGUILayout.Space(10);
+        
+        // === Ручное управление ===
+        EditorGUILayout.LabelField("Manual Time Set", EditorStyles.boldLabel);
+        
+        EditorGUILayout.BeginHorizontal();
+        EditorGUILayout.LabelField("Day:", GUILayout.Width(50));
+        var newDay = EditorGUILayout.IntField(gameTime.Day, GUILayout.Width(60));
+        if (newDay != gameTime.Day)
+        {
+            SetGameTime(em, gameTimeEntity, Mathf.Max(0, newDay), gameTime.Hour, gameTime.Minute);
+        }
+        
+        EditorGUILayout.Space(10);
+        
+        EditorGUILayout.LabelField("Hour:", GUILayout.Width(50));
+        var newHour = EditorGUILayout.IntSlider(gameTime.Hour, 0, 23, GUILayout.Width(200));
+        if (newHour != gameTime.Hour)
+        {
+            SetGameTime(em, gameTimeEntity, gameTime.Day, newHour, gameTime.Minute);
+        }
+        EditorGUILayout.EndHorizontal();
+        
+        EditorGUILayout.BeginHorizontal();
+        EditorGUILayout.LabelField("Minute:", GUILayout.Width(50));
+        var newMinute = EditorGUILayout.IntSlider(gameTime.Minute, 0, 59, GUILayout.Width(260));
+        if (newMinute != gameTime.Minute)
+        {
+            SetGameTime(em, gameTimeEntity, gameTime.Day, gameTime.Hour, newMinute);
+        }
+        EditorGUILayout.EndHorizontal();
+        
+        EditorGUILayout.Space(10);
+        DrawSeparator();
+        EditorGUILayout.Space(10);
+        
+        // === Пауза времени ===
+        var stateQuery = em.CreateEntityQuery(typeof(GameStateComponent));
+        if (stateQuery.CalculateEntityCount() > 0)
+        {
+            var stateEntity = stateQuery.GetSingletonEntity();
+            var gameState = em.GetComponentData<GameStateComponent>(stateEntity);
+            
+            EditorGUILayout.LabelField("Time Pause", EditorStyles.boldLabel);
+            
+            var isPaused = gameState.IsTimePaused;
+            var pausedColor = isPaused ? new Color(1f, 0.5f, 0.5f) : new Color(0.5f, 1f, 0.5f);
+            
+            var prev = GUI.backgroundColor;
+            GUI.backgroundColor = pausedColor;
+            
+            var pauseText = isPaused ? "▶️ Resume Time" : "⏸️ Pause Time";
+            if (GUILayout.Button(pauseText, GUILayout.Height(40)))
+            {
+                var newState = new GameStateComponent { IsTimePaused = !isPaused };
+                em.SetComponentData(stateEntity, newState);
+            }
+            
+            GUI.backgroundColor = prev;
+            
+            if (isPaused)
+            {
+                EditorGUILayout.HelpBox("⏸️ Time is PAUSED. Click Resume to continue.", MessageType.Warning);
+            }
+        }
+        stateQuery.Dispose();
+        
+        EditorGUILayout.Space(10);
+        DrawSeparator();
+        EditorGUILayout.Space(10);
+        
+        // === Информация ===
+        EditorGUILayout.LabelField("Info", EditorStyles.boldLabel);
+        EditorGUILayout.HelpBox(
+            "• Time Scale affects NPC behavior cycle\n" +
+            "• 6:00 - Wake up\n" +
+            "• 8:00-18:00 - Work hours (Civilians, Police)\n" +
+            "• 22:00-6:00 - Sleep time\n" +
+            "• Use high Time Scale (50x+) to see daily cycles quickly",
+            MessageType.Info
+        );
+        
+        query.Dispose();
+    }
+    
+    private void SetTimeScale(EntityManager em, Entity gameTimeEntity, float scale)
+    {
+        var gameTime = em.GetComponentData<GameTimeComponent>(gameTimeEntity);
+        gameTime.TimeScale = scale;
+        em.SetComponentData(gameTimeEntity, gameTime);
+        Debug.Log($"<color=cyan>Time Scale set to {scale:F2}x</color>");
+    }
+    
+    private void SetGameTime(EntityManager em, Entity gameTimeEntity, int day, int hour, int minute)
+    {
+        var totalMinutes = (day * 24 * 60) + (hour * 60) + minute;
+        var totalSeconds = totalMinutes * 60f;
+        
+        var gameTime = em.GetComponentData<GameTimeComponent>(gameTimeEntity);
+        var newTime = new GameTimeComponent
+        {
+            TotalSeconds = totalSeconds,
+            Day = day,
+            Hour = hour,
+            Minute = minute,
+            TimeScale = gameTime.TimeScale
+        };
+        
+        em.SetComponentData(gameTimeEntity, newTime);
+        Debug.Log($"<color=cyan>Game time set to Day {day}, {hour:D2}:{minute:D2}</color>");
+    }
+    
     public void DrawChunks(ViceChunkData data)
     {
         EditorGUILayout.Space(5);
@@ -126,41 +334,7 @@ public class ViceDebugUIDrawer
                 var capturedEntity = npc.Entity;
                 EditorApplication.delayCall += () =>
                 {
-                    var world = World.DefaultGameObjectInjectionWorld;
-                    if (world == null || !world.IsCreated)
-                    {
-                        Debug.LogWarning("World not available");
-                        return;
-                    }
-                    
-                    var em = world.EntityManager;
-                    if (!em.Exists(capturedEntity))
-                    {
-                        Debug.LogWarning("NPC Entity no longer exists");
-                        return;
-                    }
-                    
-                    if (!em.HasComponent<NPCId>(capturedEntity))
-                    {
-                        Debug.LogWarning("Entity is not an NPC");
-                        return;
-                    }
-                    
-                    var npcId = em.GetComponentData<NPCId>(capturedEntity);
-                    var location = em.GetComponentData<Location>(capturedEntity);
-                    var name = em.GetComponentData<NameData>(capturedEntity);
-                    var faction = em.GetComponentData<Faction>(capturedEntity);
-                    var traits = em.GetComponentData<Traits>(capturedEntity);
-                    var state = em.GetComponentData<StateFlags>(capturedEntity);
-                    
-                    Debug.Log($"=== NPC INSPECTION ===\n" +
-                             $"ID: {npcId.Value} (Seed: {npcId.GenerationSeed})\n" +
-                             $"Name: {name.FirstName} {name.LastName} ({name.Nickname})\n" +
-                             $"Position: {location.GlobalPosition2D} | Chunk [{location.ChunkId.x},{location.ChunkId.y}]\n" +
-                             $"Faction: {faction.Value}\n" +
-                             $"Traits: Aggression: {traits.Aggression:F2}, Loyalty: {traits.Loyalty:F2}, Intelligence: {traits.Intelligence:F2}\n" +
-                             $"State: Alive: {state.IsAlive}, Injured: {state.IsInjured}, Wanted: {state.IsWanted}\n" +
-                             $"Entity: {capturedEntity.Index}:{capturedEntity.Version}");
+                    NPCInspectorWindow.ShowWindow(capturedEntity);
                 };
             }
             

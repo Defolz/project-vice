@@ -8,7 +8,7 @@ public class ViceDebugWindow : EditorWindow
 {
     private Vector2 scrollPosition;
     private int selectedTab = 0;
-    private readonly string[] tabs = { "Overview", "Chunks", "NPCs", "Navigation" };
+    private readonly string[] tabs = { "Overview", "Chunks", "NPCs", "Navigation", "Time Control" };
     
     private ViceDebugDataCollector dataCollector;
     private ViceDebugUIDrawer uiDrawer;
@@ -55,6 +55,7 @@ public class ViceDebugWindow : EditorWindow
                 case 1: uiDrawer.DrawChunks(dataCollector.ChunkData); break;
                 case 2: uiDrawer.DrawNPCs(dataCollector.NPCData); break;
                 case 3: uiDrawer.DrawNavigation(dataCollector.NavigationData); break;
+                case 4: uiDrawer.DrawTimeControl(); break;
             }
         }
         catch (System.Exception e)
